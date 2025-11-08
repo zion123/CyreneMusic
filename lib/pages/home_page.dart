@@ -1,15 +1,17 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
-import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:bitsdojo_window/bitsdojo_window.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
+import 'package:flutter/material.dart';
 import '../services/music_service.dart';
 import '../services/player_service.dart';
 import '../services/version_service.dart';
 import '../services/auth_service.dart';
+import '../services/home_search_service.dart';
 import '../models/toplist.dart';
 import '../models/track.dart';
 import '../models/version_info.dart';
@@ -17,6 +19,7 @@ import '../widgets/toplist_card.dart';
 import '../widgets/track_list_tile.dart';
 import '../widgets/search_widget.dart';
 import '../utils/page_visibility_notifier.dart';
+import '../utils/theme_manager.dart';
 import '../pages/auth/auth_page.dart';
 import '../services/play_history_service.dart';
 import '../services/playlist_service.dart';
@@ -29,7 +32,9 @@ import '../services/netease_login_service.dart';
 import '../services/auto_update_service.dart';
 import 'home_for_you_tab.dart';
 import 'discover_playlist_detail_page.dart';
-import 'daily_recommend_detail_page.dart';
+import 'home_page/daily_recommend_detail_page.dart';
+import 'home_page/home_breadcrumbs.dart';
+import 'home_page/home_overlay_controller.dart';
 import 'home_page/home_widgets.dart';
 import 'home_page/toplist_detail.dart';
 
@@ -41,7 +46,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   final PageController _bannerController = PageController();
   int _currentBannerIndex = 0;
   Timer? _bannerTimer;
@@ -55,6 +61,11 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
   int? _discoverPlaylistId; // 当前展示的歌单ID
   bool _showDailyDetail = false; // 是否显示每日推荐覆盖层
   List<Map<String, dynamic>> _dailyTracks = const [];
+  final HomeOverlayController _homeOverlayController = HomeOverlayController();
+  final HomeSearchService _homeSearchService = HomeSearchService();
+  final ThemeManager _themeManager = ThemeManager();
+  String? _initialSearchKeyword;
+  int _lastHandledSearchRequestId = 0;
 
   @override
   bool get wantKeepAlive => true; // 保持页面状态
@@ -62,22 +73,22 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
   @override
   void initState() {
     super.initState();
-    
+
     // 添加应用生命周期监听
     WidgetsBinding.instance.addObserver(this);
-    
+
     // 监听音乐服务变化
     MusicService().addListener(_onMusicServiceChanged);
-    
+
     // 监听页面可见性变化
     PageVisibilityNotifier().addListener(_onPageVisibilityChanged);
-    
+
     // 监听播放历史变化
     PlayHistoryService().addListener(_onHistoryChanged);
 
     // 监听登录状态变化
     AuthService().addListener(_onAuthChanged);
-    
+
     // 如果还没有数据，自动获取
     if (MusicService().toplists.isEmpty && !MusicService().isLoading) {
       print('🏠 [HomePage] 首次加载，获取榜单数据...');
@@ -86,15 +97,31 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
       // 如果已有数据，初始化缓存并启动定时器
       _updateCachedTracksAndStartTimer();
     }
-    
+
     // 首次加载“猜你喜欢”
     _prepareGuessYouLikeFuture();
 
     // 首次加载第三方绑定状态
     _loadBindings();
 
+    // 监听来自主布局的搜索请求
+    _homeSearchService.addListener(_onExternalSearchRequested);
+    final pendingRequest = _homeSearchService.latestRequest;
+    if (pendingRequest != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _handleExternalSearchRequest(pendingRequest);
+      });
+    }
+
     // 🔍 首次进入时检查更新
     _checkForUpdateOnce();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _syncGlobalBackHandler();
+      }
+    });
   }
 
   void _onAuthChanged() {
@@ -128,7 +155,9 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
       }
       final resp = await NeteaseLoginService().fetchBindings();
       final data = resp['data'] as Map<String, dynamic>?;
-      final netease = data != null ? data['netease'] as Map<String, dynamic>? : null;
+      final netease = data != null
+          ? data['netease'] as Map<String, dynamic>?
+          : null;
       final bound = (netease != null) && (netease['bound'] == true);
       if (mounted) {
         setState(() {
@@ -156,7 +185,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
 
   void _onPageVisibilityChanged() {
     final isVisible = PageVisibilityNotifier().isHomePage;
-    
+
     if (isVisible && _isPageVisible == false) {
       // 从隐藏变为可见
       print('🏠 [HomePage] 页面重新显示，刷新轮播图...');
@@ -173,7 +202,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     if (state == AppLifecycleState.resumed && _isPageVisible) {
       // 应用恢复到前台且页面可见时，刷新轮播图
       print('🏠 [HomePage] 应用恢复，刷新轮播图...');
@@ -192,7 +221,9 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
     PageVisibilityNotifier().removeListener(_onPageVisibilityChanged);
     PlayHistoryService().removeListener(_onHistoryChanged);
     AuthService().removeListener(_onAuthChanged);
+    _homeSearchService.removeListener(_onExternalSearchRequested);
     _bannerController.dispose();
+    _homeOverlayController.setBackHandler(null);
     super.dispose();
   }
 
@@ -208,7 +239,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
   /// 更新缓存的随机歌曲列表并启动定时器
   void _updateCachedTracksAndStartTimer() {
     _cachedRandomTracks = MusicService().getRandomTracks(5);
-    
+
     // 在下一帧启动定时器，确保 UI 已渲染完成
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startBannerTimer();
@@ -235,18 +266,19 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
   /// 启动轮播图自动切换定时器
   void _startBannerTimer() {
     _bannerTimer?.cancel();
-    
+
     // 只有当有轮播图内容时才启动定时器
     if (_cachedRandomTracks.length > 1) {
       print('🎵 [HomePage] 启动轮播图定时器，共 ${_cachedRandomTracks.length} 张');
-      
+
       _bannerTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
         if (mounted && _bannerController.hasClients) {
           // 计算下一页索引
-          final nextPage = (_currentBannerIndex + 1) % _cachedRandomTracks.length;
-          
+          final nextPage =
+              (_currentBannerIndex + 1) % _cachedRandomTracks.length;
+
           print('🎵 [HomePage] 自动切换轮播图：$_currentBannerIndex -> $nextPage');
-          
+
           // 平滑切换到下一页
           _bannerController.animateToPage(
             nextPage,
@@ -278,19 +310,20 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
     try {
       // 延迟2秒后检查，避免影响首页加载
       await Future.delayed(const Duration(seconds: 2));
-      
+
       if (!mounted) return;
-      
+
       print('🔍 [HomePage] 开始检查更新...');
-      
+
       final versionInfo = await VersionService().checkForUpdate(silent: true);
-      
+
       if (!mounted) return;
-      
+
       // 如果有更新，检查是否应该提示
       if (versionInfo != null && VersionService().hasUpdate) {
         final autoUpdateService = AutoUpdateService();
-        final isAutoHandled = autoUpdateService.isEnabled &&
+        final isAutoHandled =
+            autoUpdateService.isEnabled &&
             autoUpdateService.isPlatformSupported &&
             !versionInfo.forceUpdate;
 
@@ -302,9 +335,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
                   children: [
                     const Icon(Icons.system_update_alt, color: Colors.white),
                     const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text('检测到新版本，已在后台自动更新'),
-                    ),
+                    const Expanded(child: Text('检测到新版本，已在后台自动更新')),
                   ],
                 ),
                 duration: const Duration(seconds: 3),
@@ -315,11 +346,15 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
         }
 
         // 检查用户是否已忽略此版本
-        final shouldShow = await VersionService().shouldShowUpdateDialog(versionInfo);
-        
+        final shouldShow = await VersionService().shouldShowUpdateDialog(
+          versionInfo,
+        );
+
         // 检查本次会话是否已提醒过（稍后提醒）
-        final hasReminded = VersionService().hasRemindedInSession(versionInfo.version);
-        
+        final hasReminded = VersionService().hasRemindedInSession(
+          versionInfo.version,
+        );
+
         if (shouldShow && !hasReminded) {
           _showUpdateDialog(versionInfo);
         } else {
@@ -338,7 +373,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
   /// 显示更新提示对话框
   void _showUpdateDialog(VersionInfo versionInfo) {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: !versionInfo.forceUpdate, // 强制更新时不能关闭对话框
@@ -365,27 +400,18 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
               ),
               Text(
                 '当前版本: ${VersionService().currentVersion}',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
               ),
               const SizedBox(height: 16),
-              
+
               // 更新日志
               const Text(
                 '更新内容：',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-              Text(
-                versionInfo.changelog,
-                style: const TextStyle(fontSize: 14),
-              ),
-              
+              Text(versionInfo.changelog, style: const TextStyle(fontSize: 14)),
+
               // 强制更新提示
               if (versionInfo.forceUpdate) ...[
                 const SizedBox(height: 16),
@@ -398,7 +424,11 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.warning, color: Colors.orange.shade700, size: 20),
+                      Icon(
+                        Icons.warning,
+                        color: Colors.orange.shade700,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -435,13 +465,15 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
               },
               child: const Text('稍后提醒'),
             ),
-          
+
           // 忽略此版本（仅非强制更新时显示，永久忽略）
           if (!versionInfo.forceUpdate)
             TextButton(
               onPressed: () async {
                 // 永久保存用户忽略的版本号
-                await VersionService().ignoreCurrentVersion(versionInfo.version);
+                await VersionService().ignoreCurrentVersion(
+                  versionInfo.version,
+                );
                 if (mounted) {
                   Navigator.of(context).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -454,7 +486,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
               },
               child: const Text('忽略此版本'),
             ),
-          
+
           // 立即更新
           ElevatedButton(
             onPressed: () {
@@ -480,17 +512,17 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('无法打开下载链接')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('无法打开下载链接')));
         }
       }
     } catch (e) {
       print('❌ [HomePage] 打开下载链接失败: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('打开链接失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('打开链接失败: $e')));
       }
     }
   }
@@ -530,7 +562,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
     if (shouldLogin == true && mounted) {
       // 跳转到登录页面
       final result = await showAuthDialog(context);
-      
+
       // 返回登录是否成功
       return result == true && AuthService().isLoggedIn;
     }
@@ -543,215 +575,546 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
     super.build(context); // 必须调用以支持 AutomaticKeepAliveClientMixin
     final colorScheme = Theme.of(context).colorScheme;
     final bool showTabs = _isNeteaseBound; // 绑定网易云后显示 Tabs
-    
+
+    if (_themeManager.isFluentFramework) {
+      return _buildFluentHome(context, colorScheme, showTabs);
+    }
+
+    return _buildMaterialHome(context, colorScheme, showTabs);
+  }
+
+  Widget _buildMaterialHome(
+    BuildContext context,
+    ColorScheme colorScheme,
+    bool showTabs,
+  ) {
     return Scaffold(
       backgroundColor: colorScheme.surface,
-      body: Stack(
+      body: _buildSlidingSwitcher(
+        _buildMaterialContentArea(context, colorScheme, showTabs),
+      ),
+    );
+  }
+
+  Future<void> _handleSearchPressed(BuildContext context) async {
+    final isLoggedIn = await _checkLoginStatus();
+    if (isLoggedIn && mounted) {
+      setState(() {
+        _showSearch = true;
+        _initialSearchKeyword = null;
+      });
+      _syncGlobalBackHandler();
+    }
+  }
+
+  void _handleRefreshPressed(BuildContext context) {
+    MusicService().refreshToplists();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('正在刷新榜单...')));
+  }
+
+  void _onExternalSearchRequested() {
+    final request = _homeSearchService.latestRequest;
+    if (request == null || !mounted) {
+      return;
+    }
+    _handleExternalSearchRequest(request);
+  }
+
+  void _handleExternalSearchRequest(HomeSearchRequest request) {
+    if (request.id == _lastHandledSearchRequestId) {
+      return;
+    }
+    _lastHandledSearchRequestId = request.id;
+    _openSearchFromExternal(request.keyword);
+  }
+
+  void _openSearchFromExternal(String? keyword) {
+    if (!mounted) return;
+    final normalizedKeyword = keyword?.trim();
+    setState(() {
+      _initialSearchKeyword =
+          (normalizedKeyword == null || normalizedKeyword.isEmpty)
+              ? null
+              : normalizedKeyword;
+      _showSearch = true;
+    });
+    _syncGlobalBackHandler();
+  }
+
+  Widget _buildFluentHome(
+    BuildContext context,
+    ColorScheme colorScheme,
+    bool showTabs,
+  ) {
+    final breadcrumbs = _buildBreadcrumbItems(showTabs);
+
+    return Scaffold(
+      backgroundColor: colorScheme.surface,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 主体内容或搜索
-          Positioned.fill(
-            child: _showSearch 
-                ? SearchWidget(
-                    onClose: () {
-                      setState(() {
-                        _showSearch = false;
-                      });
-                    },
-                  )
-                : CustomScrollView(
-                    slivers: [
-                // 顶部标题
-                SliverAppBar(
-                  floating: true,
-                  snap: true,
-                  backgroundColor: colorScheme.surface,
-                  title: Text(
-                    '首页',
-                    style: TextStyle(
-                      color: colorScheme.onSurface,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.search),
-                      onPressed: () async {
-                        // 检查登录状态
-                        final isLoggedIn = await _checkLoginStatus();
-                        if (isLoggedIn && mounted) {
-                          setState(() {
-                            _showSearch = true;
-                          });
-                        }
-                      },
-                      tooltip: '搜索',
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.refresh),
-                      onPressed: () {
-                        MusicService().refreshToplists();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('正在刷新榜单...')),
-                        );
-                      },
-                      tooltip: '刷新',
-                    ),
-                  ],
-                ),
-                
-                // 内容区域
-                SliverPadding(
-                  padding: const EdgeInsets.all(24.0),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      // 顶部 Tabs（仅绑定网易云后显示）
-                      if (showTabs) ...[
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12.0),
-                          child: _HomeCapsuleTabs(
-                            tabs: const ['为你推荐', '榜单'],
-                            currentIndex: _homeTabIndex,
-                            onChanged: (i) => setState(() => _homeTabIndex = i),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-
-                      // 加载状态或错误提示
-                      if (showTabs && _homeTabIndex == 0) ...[
-                        HomeForYouTab(
-                          onOpenPlaylistDetail: (id) {
-                            setState(() {
-                              _discoverPlaylistId = id;
-                              _showDiscoverDetail = true;
-                            });
-                          },
-                          onOpenDailyDetail: (tracks) {
-                            setState(() {
-                              _dailyTracks = tracks;
-                              _showDailyDetail = true;
-                            });
-                          },
-                        ),
-                      ] else ...[
-                        if (MusicService().isLoading)
-                          const LoadingSection()
-                        else if (MusicService().errorMessage != null)
-                          const ErrorSection()
-                        else if (MusicService().toplists.isEmpty)
-                          const EmptySection()
-                        else ...[
-                          // 轮播图
-                          BannerSection(
-                            cachedRandomTracks: _cachedRandomTracks,
-                            bannerController: _bannerController,
-                            currentBannerIndex: _currentBannerIndex,
-                            onPageChanged: (index) {
-                              setState(() {
-                                _currentBannerIndex = index;
-                              });
-                              print('🎵 [HomePage] 页面切换到: $index');
-                              // 用户手动滑动后重启定时器
-                              _restartBannerTimer();
-                            },
-                            checkLoginStatus: _checkLoginStatus,
-                          ),
-                          const SizedBox(height: 32),
-
-                          // 最近播放 和 猜你喜欢（响应式布局）
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              // 宽度小于 600px 或 Android 平台时使用纵向布局
-                              final useVerticalLayout = constraints.maxWidth < 600 || Platform.isAndroid;
-                              
-                              if (useVerticalLayout) {
-                                // 移动端竖屏：纵向排列
-                                return Column(
-                                  children: [
-                                    const HistorySection(),
-                                    const SizedBox(height: 16),
-                                    GuessYouLikeSection(guessYouLikeFuture: _guessYouLikeFuture),
-                                  ],
-                                );
-                              } else {
-                                // 桌面端或横屏：横向排列
-                                return Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Expanded(child: HistorySection()),
-                                    const SizedBox(width: 24),
-                                    Expanded(child: GuessYouLikeSection(guessYouLikeFuture: _guessYouLikeFuture)),
-                                  ],
-                                );
-                              }
-                            },
-                          ),
-                          const SizedBox(height: 32),
-                          
-                          // 热门榜单
-                          ToplistsGrid(
-                            checkLoginStatus: _checkLoginStatus,
-                            showToplistDetail: (toplist) => showToplistDetail(context, toplist),
-                          ),
-                        ],
-                      ],
-                    ]),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: FluentHomeBreadcrumbs(
+                    items: breadcrumbs,
+                    padding: EdgeInsets.zero,
                   ),
                 ),
+                const SizedBox(width: 12),
+                _buildFluentActionButtons(context),
               ],
             ),
           ),
-          // 歌单详情覆盖层（覆盖标题与 Tabs，但不覆盖左侧菜单栏）
-          if (_showDiscoverDetail && _discoverPlaylistId != null)
-            Positioned.fill(
-              child: Material(
-                color: Theme.of(context).colorScheme.surface,
-                child: SafeArea(
-                  child: Column(
-                    children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded),
-                          onPressed: () => setState(() {
-                            _showDiscoverDetail = false;
-                            _discoverPlaylistId = null;
-                          }),
-                          tooltip: '返回',
-                        ),
-                      ),
-                      Expanded(
-                        child: PrimaryScrollController.none(
-                          child: DiscoverPlaylistDetailContent(playlistId: _discoverPlaylistId!),
-                        ),
-                      ),
-                    ],
+          const Divider(height: 1),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: _buildSlidingSwitcher(
+                    _buildFluentContentArea(context, colorScheme, showTabs),
                   ),
                 ),
-              ),
-            ),
-
-          // 每日推荐覆盖层（覆盖标题与 Tabs）
-          if (_showDailyDetail)
-            Positioned.fill(
-              child: Material(
-                color: Theme.of(context).colorScheme.surface,
-                child: SafeArea(
-                  child: DailyRecommendDetailPage(
-                    tracks: _dailyTracks,
-                    embedded: true,
-                    onClose: () => setState(() {
-                      _showDailyDetail = false;
-                      _dailyTracks = const [];
-                    }),
+                if (_showSearch)
+                  Positioned.fill(
+                    child: SearchWidget(
+                      key: ValueKey('fluent_search_${_initialSearchKeyword ?? ''}'),
+                      onClose: () {
+                        if (!mounted) return;
+                        setState(() {
+                          _showSearch = false;
+                          _initialSearchKeyword = null;
+                        });
+                        _syncGlobalBackHandler();
+                      },
+                      initialKeyword: _initialSearchKeyword,
+                    ),
                   ),
-                ),
-              ),
+              ],
             ),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildMaterialContentArea(
+    BuildContext context,
+    ColorScheme colorScheme,
+    bool showTabs,
+  ) {
+    if (_showSearch) {
+      return SearchWidget(
+        key: ValueKey('material_search_${_initialSearchKeyword ?? ''}'),
+        onClose: () {
+          if (!mounted) return;
+          setState(() {
+            _showSearch = false;
+            _initialSearchKeyword = null;
+          });
+          _syncGlobalBackHandler();
+        },
+        initialKeyword: _initialSearchKeyword,
+      );
+    }
+
+    if (_showDailyDetail) {
+      return Material(
+        key: const ValueKey('material_daily_detail'),
+        color: colorScheme.surface,
+        child: SafeArea(
+          child: DailyRecommendDetailPage(
+            tracks: _dailyTracks,
+            embedded: true,
+            onClose: _closeDailyDetail,
+          ),
+        ),
+      );
+    }
+
+    if (_showDiscoverDetail && _discoverPlaylistId != null) {
+      return Material(
+        key: ValueKey('material_playlist_${_discoverPlaylistId!}'),
+        color: colorScheme.surface,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: _closeDiscoverDetail,
+                  tooltip: '返回',
+                ),
+              ),
+              Expanded(
+                child: PrimaryScrollController.none(
+                  child: DiscoverPlaylistDetailContent(
+                    playlistId: _discoverPlaylistId!,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return CustomScrollView(
+      key: const ValueKey('material_home_overview'),
+      slivers: _buildHomeSlivers(
+        context: context,
+        colorScheme: colorScheme,
+        showTabs: showTabs,
+        includeAppBar: true,
+      ),
+    );
+  }
+
+  Widget _buildSlidingSwitcher(Widget child) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 280),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) =>
+          _buildSlideTransition(child, animation),
+      layoutBuilder: (currentChild, previousChildren) {
+        return Stack(
+          children: [
+            ...previousChildren,
+            if (currentChild != null) currentChild,
+          ],
+        );
+      },
+      child: child,
+    );
+  }
+
+  Widget _buildSlideTransition(Widget child, Animation<double> animation) {
+    final isReverse = animation is ReverseAnimation;
+    final beginOffset = isReverse
+        ? const Offset(-1.0, 0.0)
+        : const Offset(1.0, 0.0);
+    final curvedAnimation = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    final positionAnimation = Tween<Offset>(
+      begin: beginOffset,
+      end: Offset.zero,
+    ).animate(curvedAnimation);
+
+    return SlideTransition(
+      position: positionAnimation,
+      child: FadeTransition(opacity: curvedAnimation, child: child),
+    );
+  }
+
+  List<Widget> _buildHomeSlivers({
+    required BuildContext context,
+    required ColorScheme colorScheme,
+    required bool showTabs,
+    required bool includeAppBar,
+  }) {
+    final slivers = <Widget>[];
+
+    if (includeAppBar) {
+      slivers.add(_buildHomeSliverAppBar(context, colorScheme));
+    }
+
+    slivers.add(_buildHomeContentSliver(context, showTabs));
+
+    return slivers;
+  }
+
+  SliverAppBar _buildHomeSliverAppBar(
+    BuildContext context,
+    ColorScheme colorScheme,
+  ) {
+    return SliverAppBar(
+      floating: true,
+      snap: true,
+      backgroundColor: colorScheme.surface,
+      title: Text(
+        '首页',
+        style: TextStyle(
+          color: colorScheme.onSurface,
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.search),
+          tooltip: '搜索',
+          onPressed: () => _handleSearchPressed(context),
+        ),
+        IconButton(
+          icon: const Icon(Icons.refresh),
+          tooltip: '刷新',
+          onPressed: () => _handleRefreshPressed(context),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHomeContentSliver(BuildContext context, bool showTabs) {
+    return SliverPadding(
+      padding: const EdgeInsets.all(24.0),
+      sliver: SliverList(
+        delegate: SliverChildListDelegate([
+          if (showTabs) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12.0),
+              child: _HomeCapsuleTabs(
+                tabs: const ['为你推荐', '榜单'],
+                currentIndex: _homeTabIndex,
+                onChanged: (i) => setState(() => _homeTabIndex = i),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (showTabs && _homeTabIndex == 0) ...[
+            HomeForYouTab(
+              onOpenPlaylistDetail: (id) {
+                setState(() {
+                  _homeTabIndex = 0;
+                  _discoverPlaylistId = id;
+                  _showDiscoverDetail = true;
+                });
+                _syncGlobalBackHandler();
+              },
+              onOpenDailyDetail: (tracks) {
+                setState(() {
+                  _homeTabIndex = 0;
+                  _dailyTracks = tracks;
+                  _showDailyDetail = true;
+                });
+                _syncGlobalBackHandler();
+              },
+            ),
+          ] else ...[
+            if (MusicService().isLoading)
+              const LoadingSection()
+            else if (MusicService().errorMessage != null)
+              const ErrorSection()
+            else if (MusicService().toplists.isEmpty)
+              const EmptySection()
+            else ...[
+              BannerSection(
+                cachedRandomTracks: _cachedRandomTracks,
+                bannerController: _bannerController,
+                currentBannerIndex: _currentBannerIndex,
+                onPageChanged: (index) {
+                  setState(() {
+                    _currentBannerIndex = index;
+                  });
+                  print('🎵 [HomePage] 页面切换到: $index');
+                  _restartBannerTimer();
+                },
+                checkLoginStatus: _checkLoginStatus,
+              ),
+              const SizedBox(height: 32),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final useVerticalLayout =
+                      constraints.maxWidth < 600 || Platform.isAndroid;
+
+                  if (useVerticalLayout) {
+                    return Column(
+                      children: [
+                        const HistorySection(),
+                        const SizedBox(height: 16),
+                        GuessYouLikeSection(
+                          guessYouLikeFuture: _guessYouLikeFuture,
+                        ),
+                      ],
+                    );
+                  } else {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Expanded(child: HistorySection()),
+                        const SizedBox(width: 24),
+                        Expanded(
+                          child: GuessYouLikeSection(
+                            guessYouLikeFuture: _guessYouLikeFuture,
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                },
+              ),
+              const SizedBox(height: 32),
+              ToplistsGrid(
+                checkLoginStatus: _checkLoginStatus,
+                showToplistDetail: (toplist) =>
+                    showToplistDetail(context, toplist),
+              ),
+            ],
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildFluentContentArea(
+    BuildContext context,
+    ColorScheme colorScheme,
+    bool showTabs,
+  ) {
+    if (_showDailyDetail) {
+      return Container(
+        key: const ValueKey('fluent_daily_detail'),
+        color: colorScheme.surface,
+        child: PrimaryScrollController.none(
+          child: DailyRecommendDetailPage(
+            tracks: _dailyTracks,
+            embedded: true,
+            showHeader: false,
+            onClose: _closeDailyDetail,
+          ),
+        ),
+      );
+    }
+
+    if (_showDiscoverDetail && _discoverPlaylistId != null) {
+      return Container(
+        key: ValueKey('fluent_playlist_${_discoverPlaylistId!}'),
+        color: colorScheme.surface,
+        child: PrimaryScrollController.none(
+          child: DiscoverPlaylistDetailContent(
+            playlistId: _discoverPlaylistId!,
+          ),
+        ),
+      );
+    }
+
+    if (_showSearch) {
+      return Container(
+        key: ValueKey('fluent_search_${_initialSearchKeyword ?? ''}'),
+        color: colorScheme.surface,
+        child: SearchWidget(
+          key: ValueKey('fluent_search_body_${_initialSearchKeyword ?? ''}'),
+          onClose: () {
+            if (!mounted) return;
+            setState(() {
+              _showSearch = false;
+              _initialSearchKeyword = null;
+            });
+            _syncGlobalBackHandler();
+          },
+          initialKeyword: _initialSearchKeyword,
+        ),
+      );
+    }
+
+    return CustomScrollView(
+      key: const ValueKey('fluent_home_overview'),
+      slivers: _buildHomeSlivers(
+        context: context,
+        colorScheme: colorScheme,
+        showTabs: showTabs,
+        includeAppBar: false,
+      ),
+    );
+  }
+
+  Widget _buildFluentActionButtons(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        fluent.Tooltip(
+          message: '搜索',
+          child: fluent.IconButton(
+            icon: const Icon(fluent.FluentIcons.search, size: 16),
+            onPressed: () => _handleSearchPressed(context),
+          ),
+        ),
+        const SizedBox(width: 4),
+        fluent.Tooltip(
+          message: '刷新',
+          child: fluent.IconButton(
+            icon: const Icon(fluent.FluentIcons.refresh, size: 16),
+            onPressed: () => _handleRefreshPressed(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<HomeBreadcrumbItem> _buildBreadcrumbItems(bool showTabs) {
+    final showingPlaylist = _showDiscoverDetail && _discoverPlaylistId != null;
+    final showingDaily = _showDailyDetail;
+    final showingDetail = showingPlaylist || showingDaily;
+
+    final items = <HomeBreadcrumbItem>[
+      HomeBreadcrumbItem(
+        label: '首页',
+        isEmphasized: true,
+        isCurrent: !showingDetail && !_showSearch && !_showDailyDetail,
+        onTap: showingDetail || _showSearch
+            ? () => _switchToHomeTab(_homeTabIndex)
+            : null,
+      ),
+    ];
+
+    if (_showSearch) {
+      items.add(
+        const HomeBreadcrumbItem(
+          label: '搜索',
+          isCurrent: true,
+          isEmphasized: true,
+        ),
+      );
+    } else if (showingDetail) {
+      items.add(
+        HomeBreadcrumbItem(
+          label: showingDaily ? '每日推荐' : '歌单详情',
+          isCurrent: true,
+          isEmphasized: true,
+        ),
+      );
+    }
+
+    return items;
+  }
+
+  void _switchToHomeTab(int index) {
+    if (!mounted) return;
+    setState(() {
+      _homeTabIndex = index;
+      _showDiscoverDetail = false;
+      _discoverPlaylistId = null;
+      _showDailyDetail = false;
+      _dailyTracks = const [];
+    });
+    _syncGlobalBackHandler();
+  }
+
+  void _closeDiscoverDetail() {
+    if (!mounted) return;
+    setState(() {
+      _showDiscoverDetail = false;
+      _discoverPlaylistId = null;
+    });
+    _syncGlobalBackHandler();
+  }
+
+  void _closeDailyDetail() {
+    if (!mounted) return;
+    setState(() {
+      _showDailyDetail = false;
+      _dailyTracks = const [];
+    });
+    _syncGlobalBackHandler();
   }
 
   /// 准备“猜你喜欢”的 Future
@@ -785,12 +1148,14 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
     }
 
     final List<dynamic> playlistsJson = playlistsBody['playlists'] ?? [];
-    final List<Playlist> allPlaylists =
-        playlistsJson.map((p) => Playlist.fromJson(p)).toList();
+    final List<Playlist> allPlaylists = playlistsJson
+        .map((p) => Playlist.fromJson(p))
+        .toList();
 
     // 2. 筛选非空歌单
-    final nonEmptyPlaylists =
-        allPlaylists.where((p) => p.trackCount > 0).toList();
+    final nonEmptyPlaylists = allPlaylists
+        .where((p) => p.trackCount > 0)
+        .toList();
     if (nonEmptyPlaylists.isEmpty) {
       throw Exception('没有包含歌曲的歌单');
     }
@@ -813,8 +1178,9 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
     }
 
     final List<dynamic> tracksJson = tracksBody['tracks'] ?? [];
-    final List<PlaylistTrack> tracks =
-        tracksJson.map((t) => PlaylistTrack.fromJson(t)).toList();
+    final List<PlaylistTrack> tracks = tracksJson
+        .map((t) => PlaylistTrack.fromJson(t))
+        .toList();
 
     // 4. 随机挑选3首
     tracks.shuffle();
@@ -828,6 +1194,41 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
     await PlaylistService().loadPlaylistTracks(playlistId);
     return PlaylistService().currentTracks;
   }
+
+  void _syncGlobalBackHandler() {
+    if (!mounted) {
+      _homeOverlayController.setBackHandler(null);
+      return;
+    }
+
+    if (_showSearch) {
+      _homeOverlayController.setBackHandler(() {
+        if (!mounted) return;
+        setState(() {
+          _showSearch = false;
+          _initialSearchKeyword = null;
+        });
+        _syncGlobalBackHandler();
+      });
+      return;
+    }
+
+    if (_showDailyDetail) {
+      _homeOverlayController.setBackHandler(() {
+        _closeDailyDetail();
+      });
+      return;
+    }
+
+    if (_showDiscoverDetail && _discoverPlaylistId != null) {
+      _homeOverlayController.setBackHandler(() {
+        _closeDiscoverDetail();
+      });
+      return;
+    }
+
+    _homeOverlayController.setBackHandler(null);
+  }
 }
 
 /// 首页顶部胶囊 Tabs（参考歌手详情页样式）
@@ -835,7 +1236,11 @@ class _HomeCapsuleTabs extends StatelessWidget {
   final List<String> tabs;
   final int currentIndex;
   final ValueChanged<int> onChanged;
-  const _HomeCapsuleTabs({required this.tabs, required this.currentIndex, required this.onChanged});
+  const _HomeCapsuleTabs({
+    required this.tabs,
+    required this.currentIndex,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {

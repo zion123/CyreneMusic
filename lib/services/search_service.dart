@@ -313,7 +313,20 @@ class SearchService extends ChangeNotifier {
         .toList();
 
     print('🔍 [SearchService] 合并结果: ${allTracks.length} 首 → ${mergedTracks.length} 首');
-    
+
+    if (_currentKeyword.trim().isNotEmpty) {
+      final keyword = _currentKeyword;
+      mergedTracks.sort((a, b) {
+        final scoreB = _calculateTrackRelevance(b, keyword);
+        final scoreA = _calculateTrackRelevance(a, keyword);
+        if (scoreB.compareTo(scoreA) != 0) {
+          return scoreB.compareTo(scoreA);
+        }
+        // 如果相关度相同，则按名称字典序排序（保持稳定性）
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+    }
+
     return mergedTracks;
   }
 
@@ -332,6 +345,126 @@ class SearchService extends ChangeNotifier {
         .replaceAll('/', ',')
         .replaceAll('&', ',')
         .replaceAll('，', ',');
+  }
+
+  double _calculateTrackRelevance(MergedTrack track, String keyword) {
+    final normalizedKeyword = _normalizeForScoring(keyword);
+    if (normalizedKeyword.isEmpty) {
+      return 0;
+    }
+
+    final keywordTokens = _tokenizeForScoring(keyword);
+    final strippedKeyword = _stripForLcs(keyword);
+
+    double bestScore = 0;
+    for (final candidate in track.tracks) {
+      final score = _calculateNameScore(
+        candidate.name,
+        normalizedKeyword: normalizedKeyword,
+        keywordTokens: keywordTokens,
+        strippedKeyword: strippedKeyword,
+      );
+      if (score > bestScore) {
+        bestScore = score;
+      }
+    }
+
+    return bestScore;
+  }
+
+  double _calculateNameScore(
+    String name, {
+    required String normalizedKeyword,
+    required List<String> keywordTokens,
+    required String strippedKeyword,
+  }) {
+    final normalizedName = _normalizeForScoring(name);
+    if (normalizedName.isEmpty) {
+      return 0;
+    }
+
+    if (normalizedName == normalizedKeyword) {
+      return 1.0;
+    }
+
+    if (normalizedName.startsWith(normalizedKeyword)) {
+      final ratio = normalizedKeyword.length / normalizedName.length;
+      return (0.9 + ratio * 0.1).clamp(0.0, 1.0);
+    }
+
+    if (normalizedName.contains(normalizedKeyword)) {
+      final ratio = normalizedKeyword.length / normalizedName.length;
+      return (0.75 + ratio * 0.15).clamp(0.0, 1.0);
+    }
+
+    final nameTokens = _tokenizeForScoring(name);
+    double tokenScore = 0;
+    if (keywordTokens.isNotEmpty && nameTokens.isNotEmpty) {
+      final keywordSet = keywordTokens.toSet();
+      final nameSet = nameTokens.toSet();
+      final intersectionCount =
+          keywordSet.where((token) => nameSet.contains(token)).length;
+      tokenScore = intersectionCount / keywordSet.length;
+    }
+
+    double lcsScore = 0;
+    if (strippedKeyword.isNotEmpty) {
+      final strippedName = _stripForLcs(name);
+      if (strippedName.isNotEmpty) {
+        final lcsLength =
+            _longestCommonSubsequenceLength(strippedName, strippedKeyword);
+        lcsScore = lcsLength / strippedKeyword.length;
+      }
+    }
+
+    return (tokenScore * 0.6 + lcsScore * 0.4).clamp(0.0, 1.0);
+  }
+
+  String _normalizeForScoring(String input) {
+    return input
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\u4e00-\u9fa5]+'), ' ')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  List<String> _tokenizeForScoring(String input) {
+    final normalized = _normalizeForScoring(input);
+    if (normalized.isEmpty) {
+      return const [];
+    }
+    return normalized.split(' ').where((token) => token.isNotEmpty).toList();
+  }
+
+  String _stripForLcs(String input) {
+    return input
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\u4e00-\u9fa5]+'), '');
+  }
+
+  int _longestCommonSubsequenceLength(String a, String b) {
+    final m = a.length;
+    final n = b.length;
+    if (m == 0 || n == 0) {
+      return 0;
+    }
+
+    final dp = List.generate(
+      m + 1,
+      (_) => List<int>.filled(n + 1, 0),
+    );
+
+    for (var i = 1; i <= m; i++) {
+      for (var j = 1; j <= n; j++) {
+        if (a[i - 1] == b[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = dp[i - 1][j] > dp[i][j - 1] ? dp[i - 1][j] : dp[i][j - 1];
+        }
+      }
+    }
+
+    return dp[m][n];
   }
 
   /// 清空搜索结果

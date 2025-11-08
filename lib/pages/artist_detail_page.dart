@@ -1,3 +1,4 @@
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import '../services/netease_artist_service.dart';
 import '../services/player_service.dart';
@@ -61,11 +62,30 @@ class _CapsuleTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (tabs.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final fluentTheme = fluent.FluentTheme.maybeOf(context);
+    final isFluent = fluentTheme != null;
+
     final cs = Theme.of(context).colorScheme;
-    final bg = cs.surfaceContainerHighest;
-    final pillColor = cs.primary;
-    final selFg = cs.onPrimary;
-    final unSelFg = cs.onSurfaceVariant;
+    final bg = isFluent
+        ? (fluentTheme!.resources?.controlAltFillColorSecondary ??
+            Colors.black.withOpacity(0.05))
+        : cs.surfaceContainerHighest;
+    final pillColor = isFluent
+        ? fluentTheme!.accentColor.defaultBrushFor(
+            fluentTheme.brightness,
+          )
+        : cs.primary;
+    final selFg = isFluent
+        ? fluentTheme!.resources?.textOnAccentFillColorPrimary ?? Colors.white
+        : cs.onPrimary;
+    final unSelFg = isFluent
+        ? fluentTheme!.resources?.textFillColorSecondary ??
+            Colors.white.withOpacity(0.8)
+        : cs.onSurfaceVariant;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -117,24 +137,31 @@ class _CapsuleTabs extends StatelessWidget {
               Row(
                 children: List.generate(count, (i) {
                   final selected = i == currentIndex;
+                  final tabContent = Center(
+                    child: AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeInOut,
+                      style: TextStyle(
+                        color: selected ? selFg : unSelFg,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      child: Text(tabs[i]),
+                    ),
+                  );
                   return SizedBox(
                     width: tabWidth,
                     height: height,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(radius),
-                      onTap: () => onChanged(i),
-                      child: Center(
-                        child: AnimatedDefaultTextStyle(
-                          duration: const Duration(milliseconds: 180),
-                          curve: Curves.easeInOut,
-                          style: TextStyle(
-                            color: selected ? selFg : unSelFg,
-                            fontWeight: FontWeight.w600,
+                    child: isFluent
+                        ? GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => onChanged(i),
+                            child: tabContent,
+                          )
+                        : InkWell(
+                            borderRadius: BorderRadius.circular(radius),
+                            onTap: () => onChanged(i),
+                            child: tabContent,
                           ),
-                          child: Text(tabs[i]),
-                        ),
-                      ),
-                    ),
                   );
                 }),
               ),
@@ -146,9 +173,63 @@ class _CapsuleTabs extends StatelessWidget {
   }
 }
 
+Widget _buildAdaptiveCard({
+  required bool isFluent,
+  EdgeInsetsGeometry? margin,
+  EdgeInsetsGeometry? padding,
+  required Widget child,
+}) {
+  if (isFluent) {
+    return Padding(
+      padding: margin ?? EdgeInsets.zero,
+      child: fluent.Card(
+        padding: padding ?? EdgeInsets.zero,
+        child: child,
+      ),
+    );
+  }
+  return Card(
+    margin: margin,
+    child: padding != null ? Padding(padding: padding, child: child) : child,
+  );
+}
+
+Widget _buildAdaptiveListTile({
+  required bool isFluent,
+  Widget? leading,
+  Widget? title,
+  Widget? subtitle,
+  Widget? trailing,
+  VoidCallback? onPressed,
+}) {
+  if (isFluent) {
+    return fluent.ListTile(
+      leading: leading,
+      title: title,
+      subtitle: subtitle,
+      trailing: trailing,
+      onPressed: onPressed,
+    );
+  }
+  return ListTile(
+    leading: leading,
+    title: title,
+    subtitle: subtitle,
+    trailing: trailing,
+    onTap: onPressed,
+  );
+}
+
+Widget _buildAdaptiveProgressIndicator(bool isFluent) {
+  return isFluent
+      ? const fluent.ProgressRing()
+      : const CircularProgressIndicator();
+}
+
 class _SongsListView extends StatelessWidget {
   final List<dynamic> songs;
-  const _SongsListView({super.key, required this.songs});
+  final bool isFluent;
+  const _SongsListView({super.key, required this.songs, required this.isFluent});
 
   @override
   Widget build(BuildContext context) {
@@ -170,9 +251,16 @@ class _SongsListView extends StatelessWidget {
           picUrl: m['picUrl']?.toString() ?? '',
           source: MusicSource.netease,
         );
-        return Card(
+        final trailing = isFluent
+            ? const fluent.Icon(fluent.FluentIcons.play)
+            : const Icon(Icons.play_arrow);
+
+        return _buildAdaptiveCard(
+          isFluent: isFluent,
           margin: const EdgeInsets.only(bottom: 8),
-          child: ListTile(
+          padding: EdgeInsets.zero,
+          child: _buildAdaptiveListTile(
+            isFluent: isFluent,
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: CachedNetworkImage(
@@ -184,8 +272,8 @@ class _SongsListView extends StatelessWidget {
             ),
             title: Text(track.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text('${track.artists} • ${track.album}', maxLines: 1, overflow: TextOverflow.ellipsis),
-            trailing: const Icon(Icons.play_arrow),
-            onTap: () => PlayerService().playTrack(track),
+            trailing: trailing,
+            onPressed: () => PlayerService().playTrack(track),
           ),
         );
       },
@@ -196,7 +284,8 @@ class _SongsListView extends StatelessWidget {
 class _AlbumsListView extends StatelessWidget {
   final List<dynamic> albums;
   final void Function(int albumId)? onOpenAlbum;
-  const _AlbumsListView({super.key, required this.albums, this.onOpenAlbum});
+  final bool isFluent;
+  const _AlbumsListView({super.key, required this.albums, this.onOpenAlbum, required this.isFluent});
 
   @override
   Widget build(BuildContext context) {
@@ -211,24 +300,32 @@ class _AlbumsListView extends StatelessWidget {
       itemBuilder: (context, index) {
         final a = albums[index] as Map<String, dynamic>;
         final cover = (a['coverImgUrl'] ?? '') as String;
-        return Card(
+        final trailing = isFluent
+            ? const fluent.Icon(fluent.FluentIcons.chevron_right_small)
+            : const Icon(Icons.chevron_right);
+        return _buildAdaptiveCard(
+          isFluent: isFluent,
           margin: const EdgeInsets.only(bottom: 8),
-          child: ListTile(
+          padding: EdgeInsets.zero,
+          child: _buildAdaptiveListTile(
+            isFluent: isFluent,
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: CachedNetworkImage(imageUrl: cover, width: 56, height: 56, fit: BoxFit.cover),
             ),
             title: Text(a['name']?.toString() ?? ''),
             subtitle: Text((a['company']?.toString() ?? '').isEmpty ? '' : a['company'].toString()),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
+            trailing: trailing,
+            onPressed: () {
               final id = (a['id'] as num?)?.toInt();
               if (id != null) {
                 if (onOpenAlbum != null) {
                   onOpenAlbum!(id);
                 } else {
                   Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => AlbumDetailPage(albumId: id)),
+                    isFluent
+                        ? fluent.FluentPageRoute(builder: (_) => AlbumDetailPage(albumId: id))
+                        : MaterialPageRoute(builder: (_) => AlbumDetailPage(albumId: id)),
                   );
                 }
               }
@@ -242,7 +339,8 @@ class _AlbumsListView extends StatelessWidget {
 
 class _SongsThumbView extends StatelessWidget {
   final List<dynamic> songs;
-  const _SongsThumbView({super.key, required this.songs});
+  final bool isFluent;
+  const _SongsThumbView({super.key, required this.songs, required this.isFluent});
 
   @override
   Widget build(BuildContext context) {
@@ -251,7 +349,6 @@ class _SongsThumbView extends StatelessWidget {
         child: Text('暂无歌曲', style: Theme.of(context).textTheme.bodySmall),
       );
     }
-    final cs = Theme.of(context).colorScheme;
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Wrap(
@@ -264,42 +361,51 @@ class _SongsThumbView extends StatelessWidget {
           final album = m['album']?.toString() ?? '';
           final pic = m['picUrl']?.toString() ?? '';
           final track = Track(id: m['id'], name: name, artists: artists, album: album, picUrl: pic, source: MusicSource.netease);
-          return ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 260, maxWidth: 440),
-            child: InkWell(
-              onTap: () => PlayerService().playTrack(track),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.all(10),
-                child: Row(
+          final trailing = isFluent
+              ? const fluent.Icon(fluent.FluentIcons.play)
+              : const Icon(Icons.play_arrow);
+          final cardContent = Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: CachedNetworkImage(imageUrl: pic, width: 80, height: 80, fit: BoxFit.cover),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: CachedNetworkImage(imageUrl: pic, width: 80, height: 80, fit: BoxFit.cover),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 6),
-                          Text(artists, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
-                          const SizedBox(height: 6),
-                          Text(album, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.play_arrow),
+                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    Text(artists, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 6),
+                    Text(album, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),
-            ),
+              const SizedBox(width: 8),
+              trailing,
+            ],
+          );
+          final card = _buildAdaptiveCard(
+            isFluent: isFluent,
+            padding: const EdgeInsets.all(10),
+            child: cardContent,
+          );
+          final tapHandler = () => PlayerService().playTrack(track);
+
+          return ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 260, maxWidth: 440),
+            child: isFluent
+                ? GestureDetector(
+                    onTap: tapHandler,
+                    child: card,
+                  )
+                : InkWell(
+                    onTap: tapHandler,
+                    borderRadius: BorderRadius.circular(12),
+                    child: card,
+                  ),
           );
         }).toList(),
       ),
@@ -310,7 +416,8 @@ class _SongsThumbView extends StatelessWidget {
 class _AlbumsThumbView extends StatelessWidget {
   final List<dynamic> albums;
   final void Function(int albumId)? onOpenAlbum;
-  const _AlbumsThumbView({super.key, required this.albums, this.onOpenAlbum});
+  final bool isFluent;
+  const _AlbumsThumbView({super.key, required this.albums, this.onOpenAlbum, required this.isFluent});
 
   @override
   Widget build(BuildContext context) {
@@ -319,7 +426,6 @@ class _AlbumsThumbView extends StatelessWidget {
         child: Text('暂无专辑', style: Theme.of(context).textTheme.bodySmall),
       );
     }
-    final cs = Theme.of(context).colorScheme;
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Wrap(
@@ -331,48 +437,58 @@ class _AlbumsThumbView extends StatelessWidget {
           final cover = (a['coverImgUrl'] ?? '') as String;
           final name = (a['name'] ?? '').toString();
           final sub = (a['company'] ?? '').toString();
-          return ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 260, maxWidth: 440),
-            child: InkWell(
-              onTap: () {
-                if (id != null) {
-                  if (onOpenAlbum != null) {
-                    onOpenAlbum!(id);
-                  } else {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => AlbumDetailPage(albumId: id)));
-                  }
-                }
-              },
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.all(10),
-                child: Row(
+          final trailing = isFluent
+              ? const fluent.Icon(fluent.FluentIcons.chevron_right_small)
+              : const Icon(Icons.chevron_right);
+          final cardContent = Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: CachedNetworkImage(imageUrl: cover, width: 80, height: 80, fit: BoxFit.cover),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: CachedNetworkImage(imageUrl: cover, width: 80, height: 80, fit: BoxFit.cover),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 6),
-                          Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.chevron_right),
+                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),
-            ),
+              const SizedBox(width: 8),
+              trailing,
+            ],
+          );
+          final card = _buildAdaptiveCard(
+            isFluent: isFluent,
+            padding: const EdgeInsets.all(10),
+            child: cardContent,
+          );
+          void handleTap() {
+            if (id != null) {
+              if (onOpenAlbum != null) {
+                onOpenAlbum!(id);
+              } else {
+                Navigator.of(context).push(
+                  isFluent
+                      ? fluent.FluentPageRoute(builder: (_) => AlbumDetailPage(albumId: id))
+                      : MaterialPageRoute(builder: (_) => AlbumDetailPage(albumId: id)),
+                );
+              }
+            }
+          }
+
+          return ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 260, maxWidth: 440),
+            child: isFluent
+                ? GestureDetector(onTap: handleTap, child: card)
+                : InkWell(
+                    onTap: handleTap,
+                    borderRadius: BorderRadius.circular(12),
+                    child: card,
+                  ),
           );
         }).toList(),
       ),
@@ -418,36 +534,60 @@ class _ArtistDetailContentState extends State<ArtistDetailContent> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    final isFluent = fluent.FluentTheme.maybeOf(context) != null;
+    if (_loading) {
+      return Center(child: _buildAdaptiveProgressIndicator(isFluent));
+    }
     if (_error != null) return Center(child: Text(_error!));
     final artist = _data!['artist'] as Map<String, dynamic>? ?? {};
     final albums = (_data!['albums'] as List<dynamic>? ?? []) as List<dynamic>;
     final songs = (_data!['songs'] as List<dynamic>? ?? []) as List<dynamic>;
+    final imageUrl = (artist['img1v1Url'] ?? artist['picUrl'] ?? '') as String;
+    Widget avatar;
+    if (isFluent) {
+      avatar = fluent.CircleAvatar(
+        radius: 36,
+        backgroundImage: imageUrl.isNotEmpty ? NetworkImage(imageUrl) : null,
+        child: imageUrl.isEmpty
+            ? const fluent.Icon(fluent.FluentIcons.contact)
+            : null,
+      );
+    } else {
+      avatar = CircleAvatar(
+        radius: 36,
+        backgroundImage: imageUrl.isNotEmpty ? NetworkImage(imageUrl) : null,
+        child: imageUrl.isEmpty ? const Icon(Icons.person) : null,
+      );
+    }
+    final headerContent = Row(
+      children: [
+        avatar,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(artist['name']?.toString() ?? '', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Text(artist['briefDesc']?.toString() ?? artist['description']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        ),
+      ],
+    );
 
     return Column(
       children: [
         // 顶部信息
         Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 36,
-                backgroundImage: NetworkImage((artist['img1v1Url'] ?? artist['picUrl'] ?? '') as String),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(artist['name']?.toString() ?? '', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(artist['briefDesc']?.toString() ?? artist['description']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          child: isFluent
+              ? _buildAdaptiveCard(
+                  isFluent: true,
+                  padding: const EdgeInsets.all(16),
+                  child: headerContent,
+                )
+              : headerContent,
         ),
 
         // 胶囊 Tabs
@@ -468,20 +608,7 @@ class _ArtistDetailContentState extends State<ArtistDetailContent> {
         // 视图模式切换（列表/缩略图）
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Row(
-            children: [
-              Icon(Icons.view_list, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 8),
-              Switch(
-                value: _useGrid,
-                onChanged: (v) => setState(() => _useGrid = v),
-              ),
-              const SizedBox(width: 8),
-              Icon(Icons.grid_view, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const Spacer(),
-              Text(_useGrid ? '缩略图' : '列表', style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ),
+          child: _buildViewModeToggle(context, isFluent),
         ),
 
         // 内容列表
@@ -502,13 +629,65 @@ class _ArtistDetailContentState extends State<ArtistDetailContent> {
             },
             child: _tabIndex == 0
                 ? (_useGrid
-                    ? _SongsThumbView(key: const ValueKey('artist_songs_grid'), songs: songs)
-                    : _SongsListView(key: const ValueKey('artist_songs_list'), songs: songs))
+                    ? _SongsThumbView(key: const ValueKey('artist_songs_grid'), songs: songs, isFluent: isFluent)
+                    : _SongsListView(key: const ValueKey('artist_songs_list'), songs: songs, isFluent: isFluent))
                 : (_useGrid
-                    ? _AlbumsThumbView(key: const ValueKey('artist_albums_grid'), albums: albums, onOpenAlbum: widget.onOpenAlbum)
-                    : _AlbumsListView(key: const ValueKey('artist_albums_list'), albums: albums, onOpenAlbum: widget.onOpenAlbum)),
+                    ? _AlbumsThumbView(
+                        key: const ValueKey('artist_albums_grid'),
+                        albums: albums,
+                        onOpenAlbum: widget.onOpenAlbum,
+                        isFluent: isFluent,
+                      )
+                    : _AlbumsListView(
+                        key: const ValueKey('artist_albums_list'),
+                        albums: albums,
+                        onOpenAlbum: widget.onOpenAlbum,
+                        isFluent: isFluent,
+                      )),
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildViewModeToggle(BuildContext context, bool isFluent) {
+    if (isFluent) {
+      final fluentTheme = fluent.FluentTheme.of(context);
+      final iconColor = fluentTheme.resources?.textFillColorSecondary ?? Colors.grey;
+      final labelStyle = fluentTheme.typography?.bodyStrong?.copyWith(
+            color: fluentTheme.resources?.textFillColorSecondary,
+          ) ??
+          const TextStyle();
+      return Row(
+        children: [
+          Icon(Icons.view_list, size: 18, color: iconColor),
+          const SizedBox(width: 8),
+          fluent.ToggleSwitch(
+            checked: _useGrid,
+            onChanged: (v) => setState(() => _useGrid = v),
+            content: Text(_useGrid ? '缩略图' : '列表'),
+          ),
+          const SizedBox(width: 8),
+          Icon(Icons.grid_view, size: 18, color: iconColor),
+          const Spacer(),
+          Text(_useGrid ? '缩略图' : '列表', style: labelStyle),
+        ],
+      );
+    }
+
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Icon(Icons.view_list, size: 18, color: cs.onSurfaceVariant),
+        const SizedBox(width: 8),
+        Switch(
+          value: _useGrid,
+          onChanged: (v) => setState(() => _useGrid = v),
+        ),
+        const SizedBox(width: 8),
+        Icon(Icons.grid_view, size: 18, color: cs.onSurfaceVariant),
+        const Spacer(),
+        Text(_useGrid ? '缩略图' : '列表', style: Theme.of(context).textTheme.bodySmall),
       ],
     );
   }

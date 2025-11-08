@@ -6,7 +6,7 @@ import '../services/netease_recommend_service.dart';
 import '../models/track.dart';
 import '../services/player_service.dart';
 import '../services/playlist_queue_service.dart';
-import 'daily_recommend_detail_page.dart';
+import 'home_page/daily_recommend_detail_page.dart';
 import 'discover_playlist_detail_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';

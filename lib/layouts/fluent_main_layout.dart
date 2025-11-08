@@ -17,10 +17,12 @@ import '../services/auth_service.dart';
 import '../services/auth_overlay_service.dart';
 import '../services/developer_mode_service.dart';
 import '../services/navigation_provider.dart';
+import '../services/home_search_service.dart';
 import '../utils/page_visibility_notifier.dart';
 import '../utils/theme_manager.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/search_widget.dart';
+import '../pages/home_page/home_overlay_controller.dart';
 
 /// Fluent UI 版本的主布局，使用 NavigationView
 /// 按照 Windows 设计规范实现左侧导航栏
@@ -34,6 +36,7 @@ class FluentMainLayout extends StatefulWidget {
 class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener {
   // 导航状态管理
   final NavigationProvider _navigationProvider = NavigationProvider();
+  final HomeOverlayController _homeOverlayController = HomeOverlayController();
   
   // 窗口状态
   TextEditingController? _searchController;
@@ -150,6 +153,8 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
     AuthService().addListener(_onAuthChanged);
     DeveloperModeService().addListener(_onDeveloperModeChanged);
     _navigationProvider.addListener(_onNavigationChanged);
+    _homeOverlayController.addListener(_onHomeOverlayChanged);
+    AuthOverlayService().addListener(_onAuthOverlayChanged);
 
     // 初始化系统颜色
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -169,6 +174,8 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
     DeveloperModeService().removeListener(_onDeveloperModeChanged);
     _navigationProvider.removeListener(_onNavigationChanged);
     _navigationProvider.dispose();
+    _homeOverlayController.removeListener(_onHomeOverlayChanged);
+    AuthOverlayService().removeListener(_onAuthOverlayChanged);
     super.dispose();
   }
 
@@ -216,6 +223,16 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
     });
   }
 
+  void _onHomeOverlayChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _onAuthOverlayChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   void _handleCaptionMinimize() {
     if (!Platform.isWindows) return;
     windowManager.minimize();
@@ -261,10 +278,19 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
   void _onSearchSubmitted(String value) {
     final query = value.trim();
     if (query.isEmpty) return;
-    setState(() {
-      _isSearchVisible = true;
-      _searchInitialKeyword = query;
-    });
+    void dispatchSearch() {
+      HomeSearchService().requestSearch(keyword: query);
+    }
+
+    if (_navigationProvider.currentIndex != 0) {
+      _navigationProvider.navigateTo(0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Future.microtask(dispatchSearch);
+      });
+    } else {
+      dispatchSearch();
+    }
   }
 
   Widget _buildWindowCaptionButtons(BuildContext context) {
@@ -455,7 +481,7 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
     return fluent_ui.NavigationAppBar(
       automaticallyImplyLeading: false,
       // 移除顶部折叠按钮
-      leading: const SizedBox.shrink(),
+      leading: Platform.isWindows ? _buildLeadingBackButton() : null,
       height: 50,
       title: SizedBox(
         height: double.infinity,
@@ -529,6 +555,53 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
       ),
       actions: const SizedBox.shrink(),
     );
+  }
+
+  bool get _shouldShowBackButton {
+    if (_isSearchVisible) return true;
+    if (AuthOverlayService().isVisible) return true;
+    if (_navigationProvider.currentIndex == 0 &&
+        _homeOverlayController.canPop) {
+      return true;
+    }
+    return _navigationProvider.canGoBack;
+  }
+
+  Widget _buildLeadingBackButton() {
+    if (!_shouldShowBackButton) {
+      return const SizedBox(width: 28);
+    }
+    return fluent_ui.IconButton(
+      icon: const Icon(fluent_ui.FluentIcons.back),
+      onPressed: _handleGlobalBack,
+      style: fluent_ui.ButtonStyle(
+        padding: fluent_ui.ButtonState.all(const EdgeInsets.all(4)),
+      ),
+    );
+  }
+
+  void _handleGlobalBack() {
+    if (_isSearchVisible) {
+      setState(() {
+        _isSearchVisible = false;
+        _searchInitialKeyword = null;
+      });
+      return;
+    }
+
+    if (AuthOverlayService().isVisible) {
+      AuthOverlayService().hide(false);
+      return;
+    }
+
+    if (_navigationProvider.currentIndex == 0 &&
+        _homeOverlayController.handleBack()) {
+      return;
+    }
+
+    if (_navigationProvider.canGoBack) {
+      _navigationProvider.goBack();
+    }
   }
 
   /// 构建搜索覆盖层
