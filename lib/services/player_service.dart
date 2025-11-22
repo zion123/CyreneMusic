@@ -173,6 +173,29 @@ class PlayerService extends ChangeNotifier {
     } else {
       print('⚠️ [PlayerService] 本地代理服务器启动失败，将使用备用方案');
     }
+    
+    // 设置桌面歌词播放控制回调（Windows）
+    if (Platform.isWindows) {
+      DesktopLyricService().setPlaybackControlCallback((action) {
+        print('🎮 [PlayerService] 桌面歌词控制: $action');
+        switch (action) {
+          case 'play_pause':
+            if (isPlaying) {
+              pause();
+            } else {
+              resume();
+            }
+            break;
+          case 'previous':
+            playPrevious();
+            break;
+          case 'next':
+            playNext();
+            break;
+        }
+      });
+      print('✅ [PlayerService] 桌面歌词播放控制回调已设置');
+    }
 
     print('🎵 [PlayerService] 播放器初始化完成');
   }
@@ -492,6 +515,8 @@ class PlayerService extends ChangeNotifier {
         return;
       }
 
+      // ✅ 优化：立即设置默认色，避免UI阻塞
+      themeColorNotifier.value = Colors.grey[700]!;
       print('🎨 [PlayerService] 开始提取主题色${isMobileGradientMode ? '（从封面底部）' : ''}...');
       
       Color? themeColor;
@@ -504,24 +529,20 @@ class PlayerService extends ChangeNotifier {
         themeColor = await _extractColorFromFullImage(imageUrl);
       }
 
-      // 如果仍然无法提取颜色，使用默认值
-      if (themeColor == null) {
-        print('⚠️ [PlayerService] 无法从封面提取颜色（可能是网络问题），使用默认灰色');
-        themeColor = Colors.grey[700]!;
+      // 如果提取成功，更新主题色（会平滑过渡）
+      if (themeColor != null) {
+        _themeColorCache[cacheKey] = themeColor;
+        themeColorNotifier.value = themeColor;
+        print('✅ [PlayerService] 主题色提取完成: $themeColor');
+      } else {
+        print('⚠️ [PlayerService] 无法从封面提取颜色（可能是网络问题），保持默认灰色');
       }
-
-      _themeColorCache[cacheKey] = themeColor;
-      themeColorNotifier.value = themeColor;
-      print('✅ [PlayerService] 主题色提取完成: $themeColor');
     } on TimeoutException catch (e) {
-      print('⏱️ [PlayerService] 主题色提取超时: 网络较慢，使用默认灰色');
-      final defaultColor = Colors.grey[700]!;
-      themeColorNotifier.value = defaultColor;
-      // 超时不影响正常使用，不再打印堆栈信息
+      print('⏱️ [PlayerService] 主题色提取超时: 网络较慢，保持默认灰色');
+      // 已经设置了默认色，不需要再次设置
     } catch (e) {
       print('⚠️ [PlayerService] 主题色提取失败: $e');
-      final defaultColor = Colors.grey[700]!;
-      themeColorNotifier.value = defaultColor;
+      // 已经设置了默认色，不需要再次设置
     }
   }
 
@@ -529,24 +550,19 @@ class PlayerService extends ChangeNotifier {
   Future<Color?> _extractColorFromFullImage(String imageUrl) async {
     try {
       final imageProvider = CachedNetworkImageProvider(imageUrl);
-      // 增加超时时间，网络慢时给予更多时间
-      final timeout = Platform.isAndroid 
-          ? const Duration(seconds: 10) 
-          : const Duration(seconds: 8);
       
       final paletteGenerator = await PaletteGenerator.fromImageProvider(
         imageProvider,
-        maximumColorCount: Platform.isAndroid ? 16 : 12,
-        timeout: timeout,
+        size: const Size(150, 150),      // ✅ 优化：缩小图片尺寸，提升速度
+        maximumColorCount: 8,             // ✅ 优化：减少采样数（从12-16降到8）
+        timeout: const Duration(seconds: 3), // ✅ 优化：缩短超时时间
       );
 
       return paletteGenerator.vibrantColor?.color ?? 
              paletteGenerator.dominantColor?.color ??
-             paletteGenerator.darkVibrantColor?.color ??
-             paletteGenerator.lightVibrantColor?.color ??
              paletteGenerator.mutedColor?.color;
     } on TimeoutException catch (e) {
-      print('⏱️ [PlayerService] 图片加载超时，使用默认颜色: ${e.message}');
+      print('⏱️ [PlayerService] 图片加载超时，使用默认颜色');
       return null; // 返回 null，让外层使用默认颜色
     } catch (e) {
       print('⚠️ [PlayerService] 提取颜色异常: $e');
@@ -559,8 +575,10 @@ class PlayerService extends ChangeNotifier {
     try {
       final imageProvider = CachedNetworkImageProvider(imageUrl);
       
-      // 加载图片（增加超时时间）
-      final imageStream = imageProvider.resolve(const ImageConfiguration());
+      // ✅ 优化：使用缩略图加载，减少处理时间
+      final imageStream = imageProvider.resolve(
+        const ImageConfiguration(size: Size(150, 150))
+      );
       final completer = async_lib.Completer<ui.Image>();
       late ImageStreamListener listener;
       
@@ -573,12 +591,12 @@ class PlayerService extends ChangeNotifier {
       });
       
       imageStream.addListener(listener);
-      // 增加图片加载超时时间
+      // ✅ 优化：缩短图片加载超时时间
       final image = await completer.future.timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 3),
         onTimeout: () {
           imageStream.removeListener(listener);
-          throw TimeoutException('图片加载超时', const Duration(seconds: 10));
+          throw TimeoutException('图片加载超时', const Duration(seconds: 3));
         },
       );
       
@@ -591,24 +609,22 @@ class PlayerService extends ChangeNotifier {
       // 创建一个自定义的 ImageProvider 用于底部区域
       final region = Rect.fromLTWH(0, topOffset.toDouble(), width.toDouble(), bottomHeight.toDouble());
       
-      // 对底部区域进行颜色提取（增加超时时间）
+      // 对底部区域进行颜色提取
       final paletteGenerator = await PaletteGenerator.fromImageProvider(
         imageProvider,
         region: region,
-        size: Size(width.toDouble(), height.toDouble()), // 必须提供原始图片尺寸
-        maximumColorCount: 20, // 增加采样数以获得更准确的底部颜色
-        timeout: const Duration(seconds: 10),
+        size: const Size(150, 150),          // ✅ 优化：使用缩略图尺寸
+        maximumColorCount: 10,                // ✅ 优化：减少采样数（从20降到10）
+        timeout: const Duration(seconds: 3), // ✅ 优化：缩短超时时间
       );
 
       print('🎨 [PlayerService] 从底部区域提取颜色（区域: ${region.toString()}）');
       
       return paletteGenerator.vibrantColor?.color ?? 
              paletteGenerator.dominantColor?.color ??
-             paletteGenerator.darkVibrantColor?.color ??
-             paletteGenerator.lightVibrantColor?.color ??
              paletteGenerator.mutedColor?.color;
     } on TimeoutException catch (e) {
-      print('⏱️ [PlayerService] 图片加载超时（${e.duration?.inSeconds}秒），回退到默认颜色');
+      print('⏱️ [PlayerService] 图片加载超时，回退到默认颜色');
       // 超时不再回退到全图提取，直接返回 null
       return null;
     } catch (e) {
@@ -998,6 +1014,17 @@ class PlayerService extends ChangeNotifier {
   /// 加载桌面/悬浮歌词（Windows/Android平台）
   void _loadLyricsForFloatingDisplay() {
     final currentSong = _currentSong;
+    final currentTrack = _currentTrack;
+    
+    // 更新桌面歌词的歌曲信息（Windows）
+    if (Platform.isWindows && DesktopLyricService().isVisible && currentTrack != null) {
+      DesktopLyricService().setSongInfo(
+        title: currentTrack.name,
+        artist: currentTrack.artists,
+        albumCover: currentTrack.picUrl,
+      );
+    }
+    
     if (currentSong == null || currentSong.lyric.isEmpty) {
       print('📝 [PlayerService] 悬浮歌词：无歌词可显示');
       _lyrics = [];

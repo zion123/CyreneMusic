@@ -113,6 +113,26 @@ class NeteaseRecommendService extends ChangeNotifier {
     final results = await Future.wait(futures);
     return results.where((e) => e.isNotEmpty).cast<Map<String, dynamic>>().toList();
   }
+
+  /// 聚合接口：一次性获取为你推荐所需的全部数据
+  Future<Map<String, List<Map<String, dynamic>>>> fetchForYouCombined({int personalizedLimit = 12, int newsongLimit = 10}) async {
+    final url = '${UrlService().neteaseForYouUrl}?personalizedLimit=$personalizedLimit&newsongLimit=$newsongLimit';
+    final resp = await http.get(Uri.parse(url), headers: _authHeaders()).timeout(const Duration(seconds: 20));
+    if (resp.statusCode != 200) throw Exception('HTTP ${resp.statusCode}');
+    final data = json.decode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+    if ((data['status'] as num?)?.toInt() != 200 || data['data'] == null) {
+      throw Exception('status ${data['status']}');
+    }
+    final d = data['data'] as Map<String, dynamic>;
+    return <String, List<Map<String, dynamic>>>{
+      'dailySongs': (d['dailySongs'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+      'fm': (d['fm'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+      'dailyPlaylists': (d['dailyPlaylists'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+      'personalizedPlaylists': (d['personalizedPlaylists'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+      'radarPlaylists': (d['radarPlaylists'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+      'personalizedNewsongs': (d['personalizedNewsongs'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+    };
+  }
 }
 
 

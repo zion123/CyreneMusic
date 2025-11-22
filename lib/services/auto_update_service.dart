@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
@@ -325,6 +327,13 @@ class AutoUpdateService extends ChangeNotifier {
     final bytes = await archiveFile.readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes, verify: true);
 
+    // 在 Windows 上，解压到临时目录并启动独立更新器
+    if (Platform.isWindows) {
+      await _installOnWindowsWithUpdater(archive, archiveFile);
+      return;
+    }
+
+    // 其他桌面平台：直接解压到安装目录
     final installDir = Directory(_resolveInstallDirectory());
     final rootSegments = <String>{};
     for (final entry in archive) {
@@ -376,29 +385,11 @@ class AutoUpdateService extends ChangeNotifier {
           file.parent.createSync(recursive: true);
           final data = entry.content as List<int>;
           
-          // 尝试写入文件，如果文件被锁定则跳过
-          try {
-            await file.writeAsBytes(data, flush: true);
-            successCount++;
-            DeveloperModeService().addLog('✅ 更新文件: $sanitizedName');
-          } catch (e) {
-            // Windows错误1224表示文件在使用用户映射区域，无法覆盖
-            if (e.toString().contains('1224') || 
-                e.toString().contains('用户映射区域') ||
-                e.toString().contains('无法在使用') ||
-                e.toString().contains('file is being used')) {
-              skipCount++;
-              skippedFiles.add(sanitizedName);
-              DeveloperModeService().addLog('⏭️ 跳过锁定文件: $sanitizedName (将在重启后生效)');
-            } else {
-              // 其他错误，记录并继续
-              DeveloperModeService().addLog('⚠️ 更新文件失败: $sanitizedName - $e');
-              skipCount++;
-              skippedFiles.add(sanitizedName);
-            }
-          }
+          await file.writeAsBytes(data, flush: true);
+          successCount++;
+          DeveloperModeService().addLog('✅ 更新文件: $sanitizedName');
         } catch (e) {
-          DeveloperModeService().addLog('⚠️ 处理文件失败: $sanitizedName - $e');
+          DeveloperModeService().addLog('⚠️ 更新文件失败: $sanitizedName - $e');
           skipCount++;
           skippedFiles.add(sanitizedName);
         }
@@ -420,17 +411,283 @@ class AutoUpdateService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Windows 平台使用独立更新器安装
+  Future<void> _installOnWindowsWithUpdater(Archive archive, File archiveFile) async {
+    try {
+      final installDir = Directory(_resolveInstallDirectory());
+      
+      // 创建临时更新目录
+      final tempUpdateDir = Directory(p.join(installDir.path, 'updates', 'temp_${DateTime.now().millisecondsSinceEpoch}'));
+      if (!await tempUpdateDir.exists()) {
+        await tempUpdateDir.create(recursive: true);
+      }
+      
+      DeveloperModeService().addLog('📁 临时更新目录: ${tempUpdateDir.path}');
+      
+      // 分析压缩包结构，判断是否需要去除顶层目录
+      final rootSegments = <String>{};
+      for (final entry in archive) {
+        final sanitizedName = _sanitizeArchiveEntry(entry.name);
+        if (sanitizedName.isEmpty) continue;
+        final parts = sanitizedName.split('/');
+        if (parts.isNotEmpty) {
+          rootSegments.add(parts.first);
+        }
+      }
+      
+      final shouldStripRoot = rootSegments.length == 1 && rootSegments.first.isNotEmpty;
+      final rootToStrip = shouldStripRoot ? '${rootSegments.first}/' : null;
+      
+      DeveloperModeService().addLog('📦 解压结构分析: ${shouldStripRoot ? "去除顶层目录 '$rootToStrip'" : "保持原结构"}');
+      
+      // 解压所有文件到临时目录
+      int extractCount = 0;
+      for (final entry in archive) {
+        var sanitizedName = _sanitizeArchiveEntry(entry.name);
+        if (sanitizedName.isEmpty) continue;
+        
+        // 去除顶层目录（如果需要）
+        if (rootToStrip != null && sanitizedName.startsWith(rootToStrip)) {
+          sanitizedName = sanitizedName.substring(rootToStrip.length);
+        }
+        
+        if (sanitizedName.isEmpty) continue;
+        
+        final outputPath = p.join(tempUpdateDir.path, sanitizedName);
+        
+        if (entry.isDirectory) {
+          final directory = Directory(outputPath);
+          if (!directory.existsSync()) {
+            directory.createSync(recursive: true);
+          }
+        } else {
+          final file = File(outputPath);
+          file.parent.createSync(recursive: true);
+          final data = entry.content as List<int>;
+          await file.writeAsBytes(data, flush: true);
+          extractCount++;
+          
+          // 每50个文件输出一次进度
+          if (extractCount % 50 == 0) {
+            DeveloperModeService().addLog('📦 已解压 $extractCount 个文件...');
+          }
+        }
+      }
+      
+      DeveloperModeService().addLog('✅ 解压完成，共 $extractCount 个文件');
+      
+      // 删除下载的压缩包
+      archiveFile.delete().ignore();
+      
+      // 从 assets 加载更新器脚本并写入到临时文件
+      DeveloperModeService().addLog('📝 加载更新器脚本...');
+      
+      String updaterScriptContent;
+      try {
+        // 尝试从新版本的文件中读取（如果存在）
+        final newUpdaterPath = File(p.join(tempUpdateDir.path, 'data', 'flutter_assets', 'windows', 'runner', 'updater.ps1'));
+        if (await newUpdaterPath.exists()) {
+          updaterScriptContent = await newUpdaterPath.readAsString();
+          DeveloperModeService().addLog('✅ 使用新版本的更新器脚本');
+        } else {
+          // 从当前版本的 assets 加载
+          updaterScriptContent = await rootBundle.loadString('windows/runner/updater.ps1');
+          DeveloperModeService().addLog('✅ 使用当前版本的更新器脚本');
+        }
+      } catch (e) {
+        DeveloperModeService().addLog('❌ 加载更新器脚本失败: $e');
+        throw Exception('无法加载更新器脚本: $e');
+      }
+      
+      // 将脚本写入到临时文件
+      final updaterScriptFile = File(p.join(tempUpdateDir.parent.path, 'updater_${DateTime.now().millisecondsSinceEpoch}.ps1'));
+      await updaterScriptFile.writeAsString(updaterScriptContent);
+      DeveloperModeService().addLog('📝 更新器脚本已写入: ${updaterScriptFile.path}');
+      
+      // 验证文件是否真的存在
+      if (!await updaterScriptFile.exists()) {
+        throw Exception('更新器脚本文件写入失败');
+      }
+      DeveloperModeService().addLog('✓ 已验证脚本文件存在');
+      
+      File updaterToUse = updaterScriptFile;
+      
+      // 准备更新器参数
+      final exePath = Platform.resolvedExecutable;
+      
+      // 确保路径格式正确
+      final installDirPath = installDir.path.replaceAll('/', '\\');
+      final updateDirPath = tempUpdateDir.path.replaceAll('/', '\\');
+      final exePathClean = exePath.replaceAll('/', '\\');
+      final scriptPath = updaterToUse.path.replaceAll('/', '\\');
+      
+      // 先创建一个批处理文件来启动更新器（最可靠的方式）
+      final batchFile = File(p.join(tempUpdateDir.parent.path, 'start_updater.bat'));
+      final batchContent = '''@echo off
+echo ========================================
+echo Cyrene Music Updater
+echo ========================================
+echo.
+echo Script: $scriptPath
+echo Install: $installDirPath
+echo Update: $updateDirPath
+echo.
+echo Starting updater...
+echo.
+
+powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -File "$scriptPath" -InstallDir "$installDirPath" -UpdateDir "$updateDirPath" -ExePath "$exePathClean" -WaitSeconds 3
+
+echo.
+echo Update completed
+echo Window will close automatically in 2 seconds...
+timeout /t 2 /nobreak >nul
+exit
+''';
+      
+      // 使用 ASCII 编码写入批处理文件（避免中文编码问题）
+      await batchFile.writeAsString(batchContent, encoding: latin1);
+      DeveloperModeService().addLog('📝 批处理文件已创建: ${batchFile.path}');
+      
+      DeveloperModeService().addLog('🚀 启动更新器...');
+      DeveloperModeService().addLog('   批处理文件: ${batchFile.path}');
+      DeveloperModeService().addLog('   更新器脚本: $scriptPath');
+      DeveloperModeService().addLog('   安装目录: $installDirPath');
+      DeveloperModeService().addLog('   更新目录: $updateDirPath');
+      DeveloperModeService().addLog('   主程序: $exePathClean');
+      
+      try {
+        // 方式1: 直接运行批处理文件（最简单可靠）
+        final process = await Process.start(
+          batchFile.path,
+          [],
+          mode: ProcessStartMode.detached,
+          runInShell: true,
+        );
+        
+        DeveloperModeService().addLog('✅ 更新器批处理已启动 (PID: ${process.pid})');
+      } catch (e) {
+        DeveloperModeService().addLog('❌ 批处理启动失败: $e');
+        DeveloperModeService().addLog('尝试方式2: 使用 cmd 启动批处理');
+        
+        // 方式2: 使用 cmd /c 启动
+        try {
+          final process = await Process.start(
+            'cmd.exe',
+            ['/c', batchFile.path],
+            mode: ProcessStartMode.detached,
+            runInShell: false,
+          );
+          
+          DeveloperModeService().addLog('✅ 更新器批处理已启动 (方式2, PID: ${process.pid})');
+        } catch (e2) {
+          DeveloperModeService().addLog('❌ 方式2也失败: $e2');
+          DeveloperModeService().addLog('尝试方式3: 直接启动 PowerShell');
+          
+          // 方式3: 直接启动 PowerShell（最后的备用方案）
+          final arguments = [
+            '-WindowStyle', 'Hidden',
+            '-ExecutionPolicy', 'Bypass',
+            '-NoProfile',
+            '-File', scriptPath,
+            '-InstallDir', installDirPath,
+            '-UpdateDir', updateDirPath,
+            '-ExePath', exePathClean,
+            '-WaitSeconds', '3',
+          ];
+          
+          try {
+            final process = await Process.start(
+              'powershell.exe',
+              arguments,
+              mode: ProcessStartMode.detached,
+            );
+            
+            DeveloperModeService().addLog('✅ 更新器进程已启动 (方式3, PID: ${process.pid})');
+          } catch (e3) {
+            DeveloperModeService().addLog('❌ 所有方式都失败了');
+            DeveloperModeService().addLog('   错误1: $e');
+            DeveloperModeService().addLog('   错误2: $e2');
+            DeveloperModeService().addLog('   错误3: $e3');
+            throw Exception('无法启动更新器进程，请查看日志了解详情');
+          }
+        }
+      }
+      
+      _statusMessage = '更新器已启动，应用即将重启';
+      _requiresRestart = true;
+      notifyListeners();
+      
+      DeveloperModeService().addLog('⏳ 等待 2 秒确保更新器完全启动...');
+      
+      // 增加等待时间，确保更新器完全启动
+      await Future.delayed(const Duration(seconds: 2));
+      
+      DeveloperModeService().addLog('👋 退出应用 - exit(0)');
+      
+      // 退出应用
+      exit(0);
+      
+    } catch (e, stackTrace) {
+      DeveloperModeService().addLog('❌ Windows 更新器启动失败: $e');
+      DeveloperModeService().addLog(stackTrace.toString());
+      rethrow;
+    }
+  }
+
   Future<void> _installOnAndroid(File packageFile) async {
     if (!packageFile.path.endsWith('.apk')) {
       await _openFile(packageFile);
       return;
     }
 
-    _statusMessage = '正在调用系统安装程序...';
+    _statusMessage = '准备安装更新...';
     notifyListeners();
 
-    final result = await OpenFilex.open(packageFile.path);
-    DeveloperModeService().addLog('📱 APK 安装结果: ${result.message}');
+    try {
+      // 检查并请求安装权限（Android 8.0+）
+      if (Platform.isAndroid) {
+        DeveloperModeService().addLog('📱 检查安装权限...');
+        // OpenFilex 会自动处理权限请求
+      }
+
+      _statusMessage = '正在调用系统安装程序...';
+      notifyListeners();
+
+      // 使用 OpenFilex 打开 APK 文件
+      // type: 1 表示强制使用 APK 安装器
+      final result = await OpenFilex.open(
+        packageFile.path,
+        type: 'application/vnd.android.package-archive',
+        uti: 'com.android.package-archive',
+      );
+      
+      DeveloperModeService().addLog('📱 APK 安装结果: ${result.message}');
+      DeveloperModeService().addLog('📱 结果类型: ${result.type}');
+      
+      if (result.type == ResultType.done) {
+        _statusMessage = '已打开安装程序，请按照提示完成安装';
+        DeveloperModeService().addLog('✅ 安装程序已打开');
+      } else if (result.type == ResultType.noAppToOpen) {
+        _statusMessage = '无法打开安装程序';
+        _lastError = '系统无法找到 APK 安装器';
+        DeveloperModeService().addLog('❌ 无法打开安装程序');
+      } else if (result.type == ResultType.permissionDenied) {
+        _statusMessage = '权限被拒绝';
+        _lastError = '需要授予"安装未知应用"权限才能更新';
+        DeveloperModeService().addLog('❌ 安装权限被拒绝');
+      } else {
+        _statusMessage = '打开安装程序时出错';
+        _lastError = result.message;
+        DeveloperModeService().addLog('⚠️ 安装出错: ${result.message}');
+      }
+    } catch (e, stackTrace) {
+      _statusMessage = '安装失败';
+      _lastError = e.toString();
+      DeveloperModeService().addLog('❌ 安装异常: $e');
+      DeveloperModeService().addLog(stackTrace.toString());
+    }
+    
+    notifyListeners();
   }
 
   Future<void> _openFile(File file) async {

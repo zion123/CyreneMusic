@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent_ui;
 import 'package:http/http.dart' as http;
 import '../../services/url_service.dart';
+import '../../widgets/fluent_settings_card.dart';
 
 /// 网络设置组件
 class NetworkSettings extends StatefulWidget {
@@ -37,20 +39,50 @@ class _NetworkSettingsState extends State<NetworkSettings> {
 
   void _handleUrlChanged() {
     if (!mounted) return;
-    setState(() {});
-    _testConnection();
-    _startAutoRefresh();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {});
+      _testConnection();
+      _startAutoRefresh();
+    });
   }
 
   void _startAutoRefresh() {
     _autoRefreshTimer?.cancel();
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      _testConnection();
+      if (mounted) {
+        _testConnection();
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final isFluent = fluent_ui.FluentTheme.maybeOf(context) != null;
+
+    if (isFluent) {
+      return FluentSettingsGroup(
+        title: '网络',
+        children: [
+          FluentSettingsTile(
+            icon: Icons.dns,
+            title: '后端源',
+            subtitle: UrlService().getSourceDescription(),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showBackendSourceDialogFluent(context),
+          ),
+          FluentSettingsTile(
+            icon: Icons.wifi_tethering,
+            title: '测试连接',
+            subtitle: _errorMessage != null
+                ? '无法连接后端服务器'
+                : '自动检测与后端服务器的连接',
+            trailing: _buildLatencyIndicator(context),
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -93,6 +125,133 @@ class _NetworkSettingsState extends State<NetworkSettings> {
           color: Theme.of(context).colorScheme.primary,
         ),
       ),
+    );
+  }
+
+  void _showCustomUrlDialogFluent(BuildContext context) {
+    final controller = TextEditingController(text: UrlService().customBaseUrl);
+
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) {
+        return fluent_ui.ContentDialog(
+          title: const Text('自定义后端源'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              fluent_ui.TextBox(
+                controller: controller,
+                placeholder: 'http://example.com:4055',
+                prefix: const Padding(
+                  padding: EdgeInsets.only(left: 8.0),
+                  child: Icon(Icons.link),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text('不要在末尾添加斜杠'),
+            ],
+          ),
+          actions: [
+            fluent_ui.Button(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            fluent_ui.FilledButton(
+              onPressed: () {
+                final url = controller.text.trim();
+
+                if (url.isEmpty) {
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('请输入后端地址')),
+                    );
+                  }
+                  return;
+                }
+
+                if (!UrlService.isValidUrl(url)) {
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('URL 格式不正确')),
+                    );
+                  }
+                  return;
+                }
+
+                UrlService().useCustomSource(url);
+                Navigator.pop(context);
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('已切换到自定义源: $url')),
+                  );
+                }
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showBackendSourceDialogFluent(BuildContext context) {
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) {
+        return fluent_ui.ContentDialog(
+          title: const Text('选择后端源'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              fluent_ui.RadioButton(
+                content: const Text('官方源'),
+                checked: UrlService().sourceType == BackendSourceType.official,
+                onChanged: (v) {
+                  UrlService().useOfficialSource();
+                  Navigator.pop(context);
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('已切换到官方源')),
+                    );
+                  } 
+                },
+              ),
+              const SizedBox(height: 8),
+              fluent_ui.RadioButton(
+                content: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('自定义源'),
+                    Text(
+                      UrlService().customBaseUrl.isNotEmpty
+                          ? UrlService().customBaseUrl
+                          : '点击设置自定义地址',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+                checked: UrlService().sourceType == BackendSourceType.custom,
+                onChanged: (v) {
+                  Navigator.pop(context);
+                  _showCustomUrlDialogFluent(context);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            fluent_ui.Button(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -205,26 +364,32 @@ class _NetworkSettingsState extends State<NetworkSettings> {
           FilledButton(
             onPressed: () {
               final url = controller.text.trim();
-              
               if (url.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请输入后端地址')),
-                );
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('请输入后端地址')),
+                  );
+                }
                 return;
               }
-              
               if (!UrlService.isValidUrl(url)) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('URL 格式不正确')),
-                );
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('URL 格式不正确')),
+                  );
+                }
                 return;
               }
-              
               UrlService().useCustomSource(url);
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('已切换到自定义源: $url')),
-              );
+              final messenger = ScaffoldMessenger.maybeOf(context);
+              if (messenger != null) {
+                messenger.showSnackBar(
+                  SnackBar(content: Text('已切换到自定义源: $url')),
+                );
+              }
             },
             child: const Text('保存'),
           ),
@@ -287,10 +452,11 @@ class _NetworkSettingsState extends State<NetworkSettings> {
   }
 
   Future<void> _testConnection() async {
-    if (_isTesting) return;
+    if (_isTesting || !mounted) return;
 
     final baseUrl = UrlService().baseUrl;
     if (baseUrl.isEmpty) {
+      if (!mounted) return;
       setState(() {
         _latencyMs = null;
         _errorMessage = '未设置后端地址';
@@ -298,6 +464,7 @@ class _NetworkSettingsState extends State<NetworkSettings> {
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       _isTesting = true;
       _errorMessage = null;

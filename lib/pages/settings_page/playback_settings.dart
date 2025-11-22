@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent_ui;
+import '../../widgets/fluent_settings_card.dart';
 import '../../services/audio_quality_service.dart';
 import '../../models/song_detail.dart';
 
@@ -8,6 +10,24 @@ class PlaybackSettings extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isFluent = fluent_ui.FluentTheme.maybeOf(context) != null;
+
+    if (isFluent) {
+      return FluentSettingsGroup(
+        title: '播放',
+        children: [
+          FluentSettingsTile(
+            icon: Icons.high_quality,
+            title: '音质选择',
+            subtitle:
+                '${AudioQualityService().getQualityName()} - ${AudioQualityService().getQualityDescription()}',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showAudioQualityDialogFluent(context),
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -17,8 +37,7 @@ class PlaybackSettings extends StatelessWidget {
             leading: const Icon(Icons.high_quality),
             title: const Text('音质选择'),
             subtitle: Text(
-              '${AudioQualityService().getQualityName()} - ${AudioQualityService().getQualityDescription()}'
-            ),
+                '${AudioQualityService().getQualityName()} - ${AudioQualityService().getQualityDescription()}'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showAudioQualityDialog(context),
           ),
@@ -59,12 +78,15 @@ class PlaybackSettings extends StatelessWidget {
                 if (value != null) {
                   AudioQualityService().setQuality(value);
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('音质设置已更新'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('音质设置已更新'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  }
                 }
               },
             ),
@@ -77,12 +99,15 @@ class PlaybackSettings extends StatelessWidget {
                 if (value != null) {
                   AudioQualityService().setQuality(value);
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('音质设置已更新'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('音质设置已更新'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  }
                 }
               },
             ),
@@ -95,12 +120,15 @@ class PlaybackSettings extends StatelessWidget {
                 if (value != null) {
                   AudioQualityService().setQuality(value);
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('音质设置已更新'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('音质设置已更新'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  }
                 }
               },
             ),
@@ -113,6 +141,64 @@ class PlaybackSettings extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  void _showAudioQualityDialogFluent(BuildContext context) {
+    final currentQuality = AudioQualityService().currentQuality;
+
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) {
+        return fluent_ui.ContentDialog(
+          title: const Text('选择音质'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              fluent_ui.RadioButton(
+                content: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [Text('标准音质'), Text('128kbps，节省流量')],
+                ),
+                checked: currentQuality == AudioQuality.standard,
+                onChanged: (v) {
+                  AudioQualityService().setQuality(AudioQuality.standard);
+                  Navigator.pop(context);
+                },
+              ),
+              fluent_ui.RadioButton(
+                content: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [Text('极高音质'), Text('320kbps，推荐')],
+                ),
+                checked: currentQuality == AudioQuality.exhigh,
+                onChanged: (v) {
+                  AudioQualityService().setQuality(AudioQuality.exhigh);
+                  Navigator.pop(context);
+                },
+              ),
+              fluent_ui.RadioButton(
+                content: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [Text('无损音质'), Text('FLAC，音质最佳')],
+                ),
+                checked: currentQuality == AudioQuality.lossless,
+                onChanged: (v) {
+                  AudioQualityService().setQuality(AudioQuality.lossless);
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            fluent_ui.Button(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -1,17 +1,29 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import '../../services/sleep_timer_service.dart';
 import '../../services/playlist_service.dart';
 import '../../models/track.dart';
+import '../../utils/theme_manager.dart';
 
 /// 播放器对话框工具类
 /// 包含睡眠定时器对话框和添加到歌单对话框
 class PlayerDialogs {
   /// 显示睡眠定时器对话框
   static void showSleepTimer(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => const SleepTimerDialog(),
-    );
+    final isFluentUI = Platform.isWindows && ThemeManager().isFluentFramework;
+    
+    if (isFluentUI) {
+      fluent.showDialog(
+        context: context,
+        builder: (context) => const SleepTimerDialog(),
+      );
+    } else {
+      showDialog(
+        context: context,
+        builder: (context) => const SleepTimerDialog(),
+      );
+    }
   }
 
   /// 显示添加到歌单对话框
@@ -134,8 +146,18 @@ class _SleepTimerDialogState extends State<SleepTimerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final isFluentUI = Platform.isWindows && ThemeManager().isFluentFramework;
     final timer = SleepTimerService();
+
+    if (isFluentUI) {
+      return _buildFluentUI(context, timer);
+    }
+    return _buildMaterialUI(context, timer);
+  }
+
+  /// 构建 Material UI 版本
+  Widget _buildMaterialUI(BuildContext context, SleepTimerService timer) {
+    final colorScheme = Theme.of(context).colorScheme;
 
     return AlertDialog(
       title: Row(
@@ -261,6 +283,144 @@ class _SleepTimerDialogState extends State<SleepTimerDialog> {
     );
   }
 
+  /// 构建 Fluent UI 版本
+  Widget _buildFluentUI(BuildContext context, SleepTimerService timer) {
+    final fluentTheme = fluent.FluentTheme.of(context);
+
+    return fluent.ContentDialog(
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text('睡眠定时器'),
+          if (timer.isActive)
+            fluent.Button(
+              onPressed: () {
+                timer.cancel();
+                Navigator.pop(context);
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('定时器已取消')),
+                  );
+                }
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(fluent.FluentIcons.cancel, size: 14),
+                  SizedBox(width: 4),
+                  Text('取消定时'),
+                ],
+              ),
+            ),
+        ],
+      ),
+      content: SizedBox(
+        width: 480,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 当前定时器状态
+            if (timer.isActive)
+              fluent.Card(
+                padding: const EdgeInsets.all(16),
+                margin: const EdgeInsets.only(bottom: 16),
+                child: Row(
+                  children: [
+                    Icon(
+                      fluent.FluentIcons.cloud,
+                      color: fluentTheme.accentColor,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '定时器运行中',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 4),
+                          AnimatedBuilder(
+                            animation: timer,
+                            builder: (context, child) {
+                              return Text(
+                                '剩余时间: ${timer.remainingTimeString}',
+                                style: TextStyle(
+                                  color: fluentTheme.resources.textFillColorSecondary,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (timer.isActive)
+                      fluent.IconButton(
+                        icon: const Icon(fluent.FluentIcons.add_to),
+                        onPressed: () {
+                          timer.extend(15);
+                          final messenger = ScaffoldMessenger.maybeOf(context);
+                          if (messenger != null) {
+                            messenger.showSnackBar(
+                              const SnackBar(content: Text('已延长15分钟')),
+                            );
+                          }
+                        },
+                      ),
+                  ],
+                ),
+              ),
+
+            // 标签选择器
+            Container(
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: fluentTheme.resources.controlFillColorDefault,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: fluentTheme.resources.cardStrokeColorDefault,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _buildFluentTabButton(
+                      context,
+                      0,
+                      '播放时长',
+                      fluent.FluentIcons.timer,
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildFluentTabButton(
+                      context,
+                      1,
+                      '指定时间',
+                      fluent.FluentIcons.clock,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // 内容区域
+            if (_selectedTabIndex == 0)
+              _buildFluentDurationTab(fluentTheme)
+            else
+              _buildFluentTimeTab(context, fluentTheme),
+          ],
+        ),
+      ),
+      actions: [
+        fluent.Button(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+      ],
+    );
+  }
+
   /// 时长选择标签页
   Widget _buildDurationTab(ColorScheme colorScheme) {
     return Column(
@@ -338,6 +498,7 @@ class _SleepTimerDialogState extends State<SleepTimerDialog> {
 
               if (selectedTime != null) {
                 SleepTimerService().setTimerByTime(selectedTime);
+                if (!context.mounted) return;
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -361,6 +522,213 @@ class _SleepTimerDialogState extends State<SleepTimerDialog> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Fluent UI 时长选择标签页
+  Widget _buildFluentDurationTab(fluent.FluentThemeData fluentTheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '选择播放时长',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: fluentTheme.resources.textFillColorPrimary,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: _durationOptions.map((duration) {
+            final isSelected = duration == _selectedDuration;
+            return fluent.Button(
+              onPressed: () {
+                setState(() {
+                  _selectedDuration = duration;
+                });
+                SleepTimerService().setTimerByDuration(duration);
+                Navigator.pop(context);
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('定时器已设置: ${duration}分钟后停止播放'),
+                    ),
+                  );
+                }
+              },
+              style: fluent.ButtonStyle(
+                backgroundColor: fluent.ButtonState.resolveWith((states) {
+                  if (isSelected) {
+                    return fluentTheme.accentColor;
+                  }
+                  return fluentTheme.resources.controlFillColorDefault;
+                }),
+                foregroundColor: fluent.ButtonState.resolveWith((states) {
+                  if (isSelected) {
+                    return Colors.white;
+                  }
+                  return fluentTheme.resources.textFillColorPrimary;
+                }),
+              ),
+              child: Text('${duration}分钟'),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  /// 显示 Fluent UI 时间选择器
+  Future<TimeOfDay?> _showFluentTimePicker(BuildContext context) async {
+    DateTime selectedDate = DateTime.now();
+    
+    final result = await fluent.showDialog<DateTime>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return fluent.ContentDialog(
+              title: const Text('选择时间'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  fluent.TimePicker(
+                    selected: selectedDate,
+                    onChanged: (value) => setState(() => selectedDate = value),
+                  ),
+                ],
+              ),
+              actions: [
+                fluent.Button(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('取消'),
+                ),
+                fluent.FilledButton(
+                  onPressed: () => Navigator.pop(context, selectedDate),
+                  child: const Text('确定'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != null) {
+      return TimeOfDay.fromDateTime(result);
+    }
+    return null;
+  }
+
+  /// Fluent UI 时间选择标签页
+  Widget _buildFluentTimeTab(BuildContext context, fluent.FluentThemeData fluentTheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '选择停止时间',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: fluentTheme.resources.textFillColorPrimary,
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: fluent.FilledButton(
+            onPressed: () async {
+              final TimeOfDay? selectedTime = await _showFluentTimePicker(context);
+
+              if (selectedTime != null) {
+                SleepTimerService().setTimerByTime(selectedTime);
+                if (!context.mounted) return;
+                Navigator.pop(context);
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        '定时器已设置: ${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')} 停止播放',
+                      ),
+                    ),
+                  );
+                }
+              }
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(fluent.FluentIcons.clock, size: 16),
+                SizedBox(width: 8),
+                Text('选择时间'),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '音乐将在指定时间自动停止播放',
+          style: TextStyle(
+            fontSize: 12,
+            color: fluentTheme.resources.textFillColorSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建 Fluent UI 风格的标签切换按钮
+  Widget _buildFluentTabButton(
+    BuildContext context,
+    int index,
+    String text,
+    IconData icon,
+  ) {
+    final isSelected = _selectedTabIndex == index;
+    final fluentTheme = fluent.FluentTheme.of(context);
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedTabIndex = index;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? fluentTheme.resources.controlFillColorSecondary
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: isSelected
+                  ? fluentTheme.resources.textFillColorPrimary
+                  : fluentTheme.resources.textFillColorSecondary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              text,
+              style: TextStyle(
+                color: isSelected
+                    ? fluentTheme.resources.textFillColorPrimary
+                    : fluentTheme.resources.textFillColorSecondary,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

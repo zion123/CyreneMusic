@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent_ui;
 import 'package:file_picker/file_picker.dart';
 import '../../services/cache_service.dart';
 import '../../services/download_service.dart';
+import '../../widgets/fluent_settings_card.dart';
 
 /// 存储设置组件
 class StorageSettings extends StatefulWidget {
@@ -15,6 +17,51 @@ class StorageSettings extends StatefulWidget {
 class _StorageSettingsState extends State<StorageSettings> {
   @override
   Widget build(BuildContext context) {
+    final isFluent = fluent_ui.FluentTheme.maybeOf(context) != null;
+
+    if (isFluent) {
+      return FluentSettingsGroup(
+        title: '存储',
+        children: [
+          FluentSwitchTile(
+            icon: Icons.cloud_download,
+            title: '启用缓存',
+            subtitle: CacheService().cacheEnabled
+                ? '自动缓存播放过的歌曲'
+                : '缓存已禁用',
+            value: CacheService().cacheEnabled,
+            onChanged: (value) async {
+              await CacheService().setCacheEnabled(value);
+              setState(() {});
+            },
+          ),
+          if (Platform.isWindows)
+            FluentSettingsTile(
+              icon: Icons.folder,
+              title: '缓存目录',
+              subtitle: _getCacheDirSubtitle(),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showCacheDirSettingsFluent(),
+            ),
+          FluentSettingsTile(
+            icon: Icons.storage,
+            title: '缓存管理',
+            subtitle: _getCacheSubtitle(),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showCacheManagementFluent(),
+          ),
+          if (Platform.isWindows)
+            FluentSettingsTile(
+              icon: Icons.download,
+              title: '下载目录',
+              subtitle: _getDownloadDirSubtitle(),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showDownloadDirSettingsFluent(),
+            ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -216,9 +263,12 @@ class _StorageSettingsState extends State<StorageSettings> {
 
     if (stats.totalFiles == 0) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('暂无缓存可清除')),
-        );
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        if (messenger != null) {
+          messenger.showSnackBar(
+            const SnackBar(content: Text('暂无缓存可清除')),
+          );
+        }
       }
       return;
     }
@@ -244,32 +294,111 @@ class _StorageSettingsState extends State<StorageSettings> {
               Navigator.pop(context);
               
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Row(
-                      children: [
-                        SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Row(
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           ),
-                        ),
-                        SizedBox(width: 16),
-                        Text('正在清除缓存...'),
-                      ],
+                          SizedBox(width: 16),
+                          Text('正在清除缓存...'),
+                        ],
+                      ),
+                      duration: Duration(seconds: 3),
                     ),
-                    duration: Duration(seconds: 3),
-                  ),
-                );
+                  );
+                }
               }
 
               await CacheService().clearAllCache();
 
               if (mounted) {
-                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                ScaffoldMessenger.of(context).showSnackBar(
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.hideCurrentSnackBar();
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('已清除 ${stats.totalFiles} 首歌曲的缓存'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showCacheManagementFluent() async {
+    final stats = await CacheService().getCacheStats();
+    if (!mounted) return;
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) => fluent_ui.ContentDialog(
+        title: const Text('缓存管理'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('占用空间: ${stats.formattedSize}'),
+            const SizedBox(height: 8),
+            Text('已缓存 ${stats.totalFiles} 首歌曲'),
+          ],
+        ),
+        actions: [
+          fluent_ui.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+          if (stats.totalFiles > 0)
+            fluent_ui.FilledButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _confirmClearCacheFluent();
+              },
+              child: const Text('清除缓存'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmClearCacheFluent() async {
+    final stats = await CacheService().getCacheStats();
+    if (!mounted) return;
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) => fluent_ui.ContentDialog(
+        title: const Text('清除缓存'),
+        content: Text(
+          '确定要清除所有缓存吗？\n\n将删除 ${stats.totalFiles} 首歌曲的缓存\n释放 ${stats.formattedSize} 空间',
+        ),
+        actions: [
+          fluent_ui.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          fluent_ui.FilledButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await CacheService().clearAllCache();
+              final messenger = ScaffoldMessenger.maybeOf(context);
+              if (messenger != null) {
+                messenger.showSnackBar(
                   SnackBar(
                     content: Text('已清除 ${stats.totalFiles} 首歌曲的缓存'),
                     backgroundColor: Colors.green,
@@ -277,9 +406,6 @@ class _StorageSettingsState extends State<StorageSettings> {
                 );
               }
             },
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
             child: const Text('清除'),
           ),
         ],
@@ -424,11 +550,14 @@ class _StorageSettingsState extends State<StorageSettings> {
                   final success = await CacheService().setCustomCacheDir(null);
                   if (success && context.mounted) {
                     Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('已恢复默认目录，请重启应用生效'),
-                      ),
-                    );
+                    final messenger = ScaffoldMessenger.maybeOf(context);
+                    if (messenger != null) {
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text('已恢复默认目录，请重启应用生效'),
+                        ),
+                      );
+                    }
                   }
                 },
                 icon: const Icon(Icons.restore),
@@ -454,12 +583,15 @@ class _StorageSettingsState extends State<StorageSettings> {
                   if (success) {
                     _showRestartDialog(newDir);
                   } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('目录设置失败，请检查路径是否正确'),
-                        backgroundColor: Theme.of(context).colorScheme.error,
-                      ),
-                    );
+                    final messenger = ScaffoldMessenger.maybeOf(context);
+                    if (messenger != null) {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: const Text('目录设置失败，请检查路径是否正确'),
+                          backgroundColor: Theme.of(context).colorScheme.error,
+                        ),
+                      );
+                    }
                   }
                 }
               },
@@ -467,6 +599,97 @@ class _StorageSettingsState extends State<StorageSettings> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _showCacheDirSettingsFluent() async {
+    final currentCustomDir = CacheService().customCacheDir;
+    final currentDir = CacheService().currentCacheDir;
+    final defaultDir = await CacheService().getDefaultCacheDir();
+    final dirController = TextEditingController(text: currentCustomDir ?? '');
+    if (!mounted) return;
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) => fluent_ui.ContentDialog(
+        title: const Text('缓存目录设置'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('当前目录：'),
+            const SizedBox(height: 4),
+            Text(currentDir ?? '未知'),
+            const SizedBox(height: 12),
+            Text('默认目录：'),
+            const SizedBox(height: 4),
+            Text(defaultDir),
+            const SizedBox(height: 12),
+            fluent_ui.TextBox(
+              controller: dirController,
+              placeholder: '自定义目录（留空使用默认）',
+            ),
+            const SizedBox(height: 8),
+            fluent_ui.Button(
+              onPressed: () async {
+                String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+                  dialogTitle: '选择缓存目录',
+                  lockParentWindow: true,
+                );
+                if (selectedDirectory != null) {
+                  dirController.text = selectedDirectory;
+                }
+              },
+              child: const Text('浏览选择目录'),
+            ),
+          ],
+        ),
+        actions: [
+          if (currentCustomDir != null && currentCustomDir.isNotEmpty)
+            fluent_ui.Button(
+              onPressed: () async {
+                final success = await CacheService().setCustomCacheDir(null);
+                if (success) {
+                  Navigator.pop(context);
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('已恢复默认目录，请重启应用生效')),
+                    );
+                  }
+                }
+              },
+              child: const Text('恢复默认'),
+            ),
+          fluent_ui.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          fluent_ui.FilledButton(
+            onPressed: () async {
+              final newDir = dirController.text.trim();
+              if (newDir.isEmpty || newDir == currentCustomDir) {
+                Navigator.pop(context);
+                return;
+              }
+              final success = await CacheService().setCustomCacheDir(newDir);
+              if (context.mounted) {
+                Navigator.pop(context);
+                if (success) {
+                  _showRestartDialogFluent(newDir);
+                } else {
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (messenger != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('目录设置失败，请检查路径是否正确')),
+                    );
+                  }
+                }
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
       ),
     );
   }
@@ -524,6 +747,32 @@ class _StorageSettingsState extends State<StorageSettings> {
         ),
         actions: [
           FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRestartDialogFluent(String newDir) {
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) => fluent_ui.ContentDialog(
+        title: const Text('需要重启应用'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('缓存目录已设置为：'),
+            const SizedBox(height: 8),
+            Text(newDir),
+            const SizedBox(height: 12),
+            const Text('必须重启应用才能使用新目录！'),
+          ],
+        ),
+        actions: [
+          fluent_ui.FilledButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('知道了'),
           ),
@@ -628,9 +877,12 @@ class _StorageSettingsState extends State<StorageSettings> {
               final newDir = dirController.text.trim();
 
               if (newDir.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请选择下载目录')),
-                );
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('请选择下载目录')),
+                  );
+                }
                 return;
               }
 
@@ -638,13 +890,88 @@ class _StorageSettingsState extends State<StorageSettings> {
 
               if (context.mounted) {
                 Navigator.pop(context);
-                if (success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('下载目录已更新')),
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  if (success) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('下载目录已更新')),
+                    );
+                  } else {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('设置下载目录失败')),
+                    );
+                  }
+                }
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDownloadDirSettingsFluent() async {
+    final currentDownloadPath = DownloadService().downloadPath;
+    final dirController = TextEditingController(text: currentDownloadPath ?? '');
+    if (!mounted) return;
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) => fluent_ui.ContentDialog(
+        title: const Text('下载目录设置'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('当前下载目录：'),
+            const SizedBox(height: 4),
+            Text(currentDownloadPath ?? '未设置'),
+            const SizedBox(height: 12),
+            fluent_ui.TextBox(
+              controller: dirController,
+              placeholder: '例如: D:\\Music\\Cyrene',
+              readOnly: true,
+            ),
+            const SizedBox(height: 8),
+            fluent_ui.Button(
+              onPressed: () async {
+                final result = await FilePicker.platform.getDirectoryPath(
+                  dialogTitle: '选择下载目录',
+                );
+                if (result != null) {
+                  dirController.text = result;
+                }
+              },
+              child: const Text('浏览'),
+            ),
+          ],
+        ),
+        actions: [
+          fluent_ui.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          fluent_ui.FilledButton(
+            onPressed: () async {
+              final newDir = dirController.text.trim();
+              if (newDir.isEmpty) {
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('请选择下载目录')),
                   );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('设置下载目录失败')),
+                }
+                return;
+              }
+              final success = await DownloadService().setDownloadPath(newDir);
+              if (context.mounted) {
+                Navigator.pop(context);
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(success ? '下载目录已更新' : '设置下载目录失败'),
+                    ),
                   );
                 }
               }

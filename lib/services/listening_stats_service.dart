@@ -162,6 +162,10 @@ class ListeningStatsService extends ChangeNotifier {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         print('✅ [ListeningStatsService] 听歌时长已同步: +${seconds}秒, 总计: ${data['data']['totalListeningTime']}秒');
+      } else if (response.statusCode == 401) {
+        print('⚠️ [ListeningStatsService] 未授权，登录态可能失效');
+        _pendingSeconds += seconds;
+        await AuthService().handleUnauthorized();
       } else {
         print('❌ [ListeningStatsService] 同步听歌时长失败: ${response.statusCode}');
         // 同步失败，将秒数加回待同步队列
@@ -208,6 +212,9 @@ class ListeningStatsService extends ChangeNotifier {
 
       if (response.statusCode == 200) {
         print('✅ [ListeningStatsService] 播放次数已记录: ${track.name}');
+      } else if (response.statusCode == 401) {
+        print('⚠️ [ListeningStatsService] 未授权，登录态可能失效');
+        await AuthService().handleUnauthorized();
       } else {
         print('❌ [ListeningStatsService] 记录播放次数失败: ${response.statusCode}');
       }
@@ -242,6 +249,10 @@ class ListeningStatsService extends ChangeNotifier {
         notifyListeners();
         print('✅ [ListeningStatsService] 统计数据已获取');
         return _statsData;
+      } else if (response.statusCode == 401) {
+        print('⚠️ [ListeningStatsService] 未授权，登录态可能失效');
+        await AuthService().handleUnauthorized();
+        return null;
       } else {
         print('❌ [ListeningStatsService] 获取统计数据失败: ${response.statusCode}');
         return null;

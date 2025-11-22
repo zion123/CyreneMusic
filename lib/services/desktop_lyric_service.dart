@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 
 /// 桌面歌词服务（仅Windows平台）
 /// 
@@ -15,6 +16,9 @@ class DesktopLyricService {
   DesktopLyricService._internal();
 
   static const MethodChannel _channel = MethodChannel('desktop_lyric');
+  
+  // Playback control callback
+  Function(String action)? _playbackControlCallback;
 
   // 配置项的SharedPreferences键
   static const String _keyEnabled = 'desktop_lyric_enabled';
@@ -44,6 +48,8 @@ class DesktopLyricService {
     if (!Platform.isWindows) return;
 
     try {
+      // Set up method call handler for callbacks from native
+      _channel.setMethodCallHandler(_handleMethodCall);
       final prefs = await SharedPreferences.getInstance();
       
       // 加载配置
@@ -168,6 +174,25 @@ class DesktopLyricService {
       await _channel.invokeMethod('setLyricText', {'text': text});
     } catch (e) {
       print('❌ [DesktopLyric] 设置歌词失败: $e');
+    }
+  }
+  
+  /// 设置歌曲信息（标题、艺术家、专辑封面）
+  Future<void> setSongInfo({
+    required String title,
+    required String artist,
+    String? albumCover,
+  }) async {
+    if (!Platform.isWindows || !_isCreated) return;
+
+    try {
+      await _channel.invokeMethod('setSongInfo', {
+        'title': title,
+        'artist': artist,
+        'albumCover': albumCover ?? '',
+      });
+    } catch (e) {
+      print('❌ [DesktopLyric] 设置歌曲信息失败: $e');
     }
   }
 
@@ -326,6 +351,25 @@ class DesktopLyricService {
     'isDraggable': _isDraggable,
     'isMouseTransparent': _isMouseTransparent,
   };
+
+  /// 设置播放控制回调
+  void setPlaybackControlCallback(Function(String action) callback) {
+    _playbackControlCallback = callback;
+  }
+  
+  /// 处理来自原生代码的方法调用
+  Future<dynamic> _handleMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onPlaybackControl':
+        final action = call.arguments['action'] as String;
+        if (_playbackControlCallback != null) {
+          _playbackControlCallback!(action);
+        }
+        break;
+      default:
+        print('⚠️ [DesktopLyric] 未知方法调用: ${call.method}');
+    }
+  }
 
   /// 销毁窗口（应用退出时调用）
   Future<void> dispose() async {

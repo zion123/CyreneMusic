@@ -1,9 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:http/http.dart' as http;
 import '../services/playlist_service.dart';
 import '../services/player_service.dart';
 import '../services/playlist_queue_service.dart';
 import '../services/auth_service.dart';
+import '../services/url_service.dart';
 import '../models/playlist.dart';
 import '../models/track.dart';
 import '../widgets/import_playlist_dialog.dart';
@@ -37,6 +40,191 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     if (AuthService().isLoggedIn) {
       _playlistService.loadPlaylists();
     }
+  }
+
+  Future<void> _syncFromSource(Playlist playlist) async {
+    if (!mounted) return;
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) {
+        MusicPlatform selected = MusicPlatform.netease;
+        final controller = TextEditingController();
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Text('同步歌单'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: MusicPlatform.values.map((p) {
+                    final isSel = selected == p;
+                    return Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                        child: ChoiceChip(
+                          label: Text(p.name),
+                          selected: isSel,
+                          onSelected: (v) {
+                            if (v) setState(() => selected = p);
+                          },
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: '歌单ID或URL',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final input = controller.text.trim();
+                  if (input.isEmpty) return;
+                  String? pid;
+                  if (selected == MusicPlatform.netease) {
+                    pid = _parseNeteasePlaylistId(input);
+                  } else {
+                    pid = _parseQQPlaylistId(input);
+                  }
+                  if (pid == null) return;
+                  Navigator.pop(context, { 'platform': selected, 'playlistId': pid });
+                },
+                child: const Text('开始同步'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (result == null) return;
+    await _performSync(
+      playlist,
+      result['platform'] as MusicPlatform,
+      result['playlistId'] as String,
+    );
+  }
+
+  String? _parseNeteasePlaylistId(String input) {
+    final s = input.trim();
+    if (RegExp(r'^\d+$').hasMatch(s)) return s;
+    try {
+      final uri = Uri.parse(s);
+      final p = uri.queryParameters['id'];
+      if (p != null && RegExp(r'^\d+$').hasMatch(p)) return p;
+      if (uri.fragment.isNotEmpty) {
+        final parts = uri.fragment.split('?');
+        if (parts.length > 1) {
+          final qp = Uri.splitQueryString(parts[1]);
+          final id = qp['id'];
+          if (id != null && RegExp(r'^\d+$').hasMatch(id)) return id;
+        }
+      }
+      final m = RegExp(r'[?&]id=(\d+)').firstMatch(s);
+      if (m != null) return m.group(1);
+    } catch (_) {}
+    return null;
+  }
+
+  String? _parseQQPlaylistId(String input) {
+    final s = input.trim();
+    if (RegExp(r'^\d+$').hasMatch(s)) return s;
+    try {
+      final uri = Uri.parse(s);
+      final p = uri.queryParameters['id'];
+      if (p != null && RegExp(r'^\d+$').hasMatch(p)) return p;
+      if (uri.pathSegments.isNotEmpty) {
+        final last = uri.pathSegments.last;
+        if (RegExp(r'^\d+$').hasMatch(last)) return last;
+      }
+      final m = RegExp(r'[\?&/](?:id=|playlist/)(\d+)').firstMatch(s);
+      if (m != null) return m.group(1);
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _performSync(Playlist target, MusicPlatform platform, String sourcePlaylistId) async {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final baseUrl = UrlService().baseUrl;
+      final url = platform == MusicPlatform.netease
+          ? '$baseUrl/playlist?id=$sourcePlaylistId&limit=1000'
+          : '$baseUrl/qq/playlist?id=$sourcePlaylistId&limit=1000';
+      final resp = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 30));
+      if (resp.statusCode != 200) {
+        throw Exception('HTTP ${resp.statusCode}');
+      }
+      final data = json.decode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+      if ((data['status'] as int?) != 200 || data['success'] != true) {
+        throw Exception(data['msg'] ?? '获取歌单失败');
+      }
+      final playlistData = (data['data'] as Map<String, dynamic>)['playlist'] as Map<String, dynamic>;
+      final tracksJson = (playlistData['tracks'] as List).cast<dynamic>();
+      final existing = _playlistService.currentTracks.map((t) => '${t.trackId}_${t.source.toString().split('.').last}').toSet();
+      final List<Track> toAdd = [];
+      for (final e in tracksJson) {
+        final m = e as Map<String, dynamic>;
+        final id = (m['id']).toString();
+        final key = '${id}_${platform == MusicPlatform.netease ? 'netease' : 'qq'}';
+        if (!existing.contains(key)) {
+          toAdd.add(Track(
+            id: int.tryParse(id) ?? id,
+            name: m['name'] as String,
+            artists: m['artists'] as String,
+            album: m['album'] as String,
+            picUrl: (m['picUrl'] as String?) ?? '',
+            source: platform == MusicPlatform.netease ? MusicSource.netease : MusicSource.qq,
+          ));
+        }
+      }
+      int ok = 0;
+      for (final t in toAdd) {
+        final success = await _playlistService.addTrackToPlaylist(target.id, t);
+        if (success) ok++;
+      }
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('同步完成，新增 $ok 首')),
+      );
+      await _playlistService.loadPlaylistTracks(target.id);
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('同步失败: $e')),
+      );
+    }
+  }
+
+  void _syncSelectedPlaylist() async {
+    if (_selectedPlaylist == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('正在同步...'), duration: Duration(seconds: 1)),
+    );
+    final inserted = await _playlistService.syncPlaylist(_selectedPlaylist!.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('同步完成，新增 $inserted 首')),
+    );
+    await _playlistService.loadPlaylistTracks(_selectedPlaylist!.id);
   }
 
   @override
@@ -747,19 +935,29 @@ class _PlaylistsPageState extends State<PlaylistsPage>
               onPressed: _toggleEditMode,
               tooltip: '批量管理',
             ),
+          IconButton(
+            icon: const Icon(Icons.sync),
+            onPressed: _syncSelectedPlaylist,
+            tooltip: '同步新增歌曲',
+          ),
           // 刷新按钮
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _playlistService.loadPlaylistTracks(playlist.id);
+            icon: const Icon(Icons.sync),
+            onPressed: () async {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('正在刷新...'),
+                  content: Text('正在同步...'),
                   duration: Duration(seconds: 1),
                 ),
               );
+              final inserted = await _playlistService.syncPlaylist(playlist.id);
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('同步完成，新增 $inserted 首')),
+              );
+              await _playlistService.loadPlaylistTracks(playlist.id);
             },
-            tooltip: '刷新',
+            tooltip: '同步',
           ),
         ],
       ],

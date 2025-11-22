@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <string>
 #include <memory>
+#include <functional>
 
 // Desktop lyric window class
 class DesktopLyricWindow {
@@ -49,6 +50,13 @@ class DesktopLyricWindow {
   // Set mouse transparent
   void SetMouseTransparent(bool transparent);
   
+  // Set song info (title, artist, album cover URL)
+  void SetSongInfo(const std::wstring& title, const std::wstring& artist, const std::wstring& album_cover);
+  
+  // Set playback control callback
+  using PlaybackControlCallback = std::function<void(const std::string& action)>;
+  void SetPlaybackControlCallback(PlaybackControlCallback callback);
+  
   // Get window handle
   HWND GetHandle() const { return hwnd_; }
 
@@ -63,6 +71,9 @@ class DesktopLyricWindow {
   
   HWND hwnd_;
   std::wstring lyric_text_;
+  std::wstring song_title_;
+  std::wstring song_artist_;
+  std::wstring album_cover_url_;
   int font_size_;
   DWORD text_color_;
   DWORD stroke_color_;
@@ -71,6 +82,24 @@ class DesktopLyricWindow {
   bool is_dragging_;
   POINT drag_point_;
   HFONT font_;
+  
+  // Control panel state
+  bool is_hovered_;
+  bool show_controls_;
+  DWORD hover_start_time_;
+  
+  // Button hit test areas
+  RECT play_pause_button_rect_;
+  RECT prev_button_rect_;
+  RECT next_button_rect_;
+  
+  // Playback control callback
+  PlaybackControlCallback playback_callback_;
+  
+  // Helper methods
+  bool IsPointInRect(const POINT& pt, const RECT& rect) const;
+  void DrawControlPanel(HDC hdc, int width, int height);
+  void HandleButtonClick(const POINT& pt);
 };
 
 #endif  // RUNNER_DESKTOP_LYRIC_WINDOW_H_

@@ -21,8 +21,12 @@ class DesktopLyricPlugin {
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+  
+  // Playback control callback
+  void OnPlaybackControl(const std::string& action);
 
   std::unique_ptr<DesktopLyricWindow> lyric_window_;
+  flutter::MethodChannel<flutter::EncodableValue>* method_channel_;
 };
 
 #endif  // RUNNER_DESKTOP_LYRIC_PLUGIN_H_

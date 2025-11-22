@@ -13,10 +13,7 @@ class PlayerBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([
-        PlayerBackgroundService(),
-        PlayerService(), // 也监听播放器状态变化，用于更新专辑封面
-      ]),
+      animation: PlayerBackgroundService(),
       builder: (context, child) {
         return _buildBackground();
       },
@@ -146,7 +143,6 @@ class PlayerBackground extends StatelessWidget {
       valueListenable: PlayerService().themeColorNotifier,
       builder: (context, themeColor, child) {
         final color = themeColor ?? Colors.grey[700]!;
-        print('🎨 [PlayerBackground] 构建背景，主题色: $color');
         
         return RepaintBoundary(
           child: AnimatedContainer(

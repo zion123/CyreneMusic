@@ -1,9 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import 'url_service.dart';
 import 'developer_mode_service.dart';
+import 'url_service.dart';
+import 'auth_overlay_service.dart';
 import 'location_service.dart';
 
 /// 用户信息模型
@@ -14,6 +15,8 @@ class User {
   final bool isVerified;
   final String? lastLogin;
   final String? avatarUrl;
+  final bool isSponsor;
+  final String? sponsorSince;
 
   User({
     required this.id,
@@ -22,16 +25,20 @@ class User {
     required this.isVerified,
     this.lastLogin,
     this.avatarUrl,
+    this.isSponsor = false,
+    this.sponsorSince,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
-      id: json['id'],
-      email: json['email'],
-      username: json['username'],
-      isVerified: json['isVerified'] ?? false,
-      lastLogin: json['lastLogin'],
-      avatarUrl: json['avatarUrl'],
+      id: json['id'] as int,
+      email: json['email'] as String,
+      username: json['username'] as String,
+      isVerified: json['isVerified'] as bool? ?? false,
+      lastLogin: json['lastLogin'] as String?,
+      avatarUrl: json['avatarUrl'] as String?,
+      isSponsor: json['isSponsor'] as bool? ?? false,
+      sponsorSince: json['sponsorSince'] as String?,
     );
   }
 
@@ -43,6 +50,8 @@ class User {
       'isVerified': isVerified,
       'lastLogin': lastLogin,
       'avatarUrl': avatarUrl,
+      'isSponsor': isSponsor,
+      'sponsorSince': sponsorSince,
     };
   }
 }
@@ -57,26 +66,25 @@ class AuthService extends ChangeNotifier {
 
   User? _currentUser;
   bool _isLoggedIn = false;
+  String? _authToken;
 
   User? get currentUser => _currentUser;
   bool get isLoggedIn => _isLoggedIn;
   
-  /// 获取认证令牌（格式：user_{userId}）
-  String? get token {
-    if (_currentUser == null) return null;
-    return 'user_${_currentUser!.id}';
-  }
+  String? get token => _authToken;
 
   /// 从本地存储加载用户信息
   Future<void> _loadUserFromStorage() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userJson = prefs.getString('current_user');
+      final savedToken = prefs.getString('auth_token');
       
       if (userJson != null && userJson.isNotEmpty) {
         final userData = jsonDecode(userJson);
         _currentUser = User.fromJson(userData);
-        _isLoggedIn = true;
+        _authToken = savedToken;
+        _isLoggedIn = _authToken != null && _authToken!.isNotEmpty;
         print('👤 [AuthService] 从本地存储加载用户: ${_currentUser?.username}');
         notifyListeners();
       }
@@ -96,6 +104,13 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  Future<void> _saveTokenToStorage(String token) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('auth_token', token);
+    } catch (_) {}
+  }
+
   /// 清除本地存储的用户信息
   Future<void> _clearUserFromStorage() async {
     try {
@@ -105,6 +120,13 @@ class AuthService extends ChangeNotifier {
     } catch (e) {
       print('❌ [AuthService] 清除用户信息失败: $e');
     }
+  }
+
+  Future<void> _clearTokenFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('auth_token');
+    } catch (_) {}
   }
 
   /// 发送注册验证码
@@ -233,10 +255,14 @@ class AuthService extends ChangeNotifier {
       
       if (response.statusCode == 200) {
         _currentUser = User.fromJson(data['data']);
+        _authToken = data['data']['token'];
         _isLoggedIn = true;
         
         // 保存用户信息到本地
         await _saveUserToStorage(_currentUser!);
+        if (_authToken != null) {
+          await _saveTokenToStorage(_authToken!);
+        }
         
         notifyListeners();
         
@@ -362,15 +388,47 @@ class AuthService extends ChangeNotifier {
     final username = _currentUser?.username;
     _currentUser = null;
     _isLoggedIn = false;
+    _authToken = null;
     
     // 清除本地存储
     await _clearUserFromStorage();
+    await _clearTokenFromStorage();
     
     // 清除收藏列表（需要在这里导入 FavoriteService，但为避免循环依赖，改为在 FavoriteService 中监听登出）
     
     DeveloperModeService().addLog('👋 [AuthService] 用户退出登录: $username');
     
     notifyListeners();
+  }
+
+  Future<bool> validateToken() async {
+    if (_authToken == null || _authToken!.isEmpty) {
+      return false;
+    }
+    try {
+      final url = '${UrlService().baseUrl}/auth/validate-token';
+      final r = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $_authToken'},
+      );
+      if (r.statusCode == 200) {
+        final data = jsonDecode(r.body);
+        _currentUser = User.fromJson(data['data']);
+        _isLoggedIn = true;
+        notifyListeners();
+        return true;
+      }
+      await handleUnauthorized();
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> handleUnauthorized() async {
+    await logout();
+    print('当前登录态已失效，请重新登录');
+    AuthOverlayService().show();
   }
 
   /// 更新用户IP归属地

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
+import '../utils/theme_manager.dart';
 import '../services/auth_service.dart';
 import '../services/playlist_service.dart';
 import '../services/listening_stats_service.dart';
@@ -20,6 +22,7 @@ class MyPage extends StatefulWidget {
 
 class _MyPageState extends State<MyPage> {
   final PlaylistService _playlistService = PlaylistService();
+  final ThemeManager _themeManager = ThemeManager();
   ListeningStatsData? _statsData;
   bool _isLoadingStats = true;
   Playlist? _selectedPlaylist; // 当前选中的歌单
@@ -72,6 +75,11 @@ class _MyPageState extends State<MyPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isLoggedIn = AuthService().isLoggedIn;
+
+    // Fluent 框架下的渲染
+    if (_themeManager.isFluentFramework) {
+      return _buildFluentPage(context, isLoggedIn);
+    }
 
     // 如果未登录，显示登录提示
     if (!isLoggedIn) {
@@ -177,6 +185,475 @@ class _MyPageState extends State<MyPage> {
             const SizedBox(height: 8),
             _buildTopPlaysList(colorScheme),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFluentPlaylistDetailPage(Playlist playlist) {
+    final tracks = _playlistService.currentPlaylistId == playlist.id
+        ? _playlistService.currentTracks
+        : <PlaylistTrack>[];
+    final isLoading = _playlistService.isLoadingTracks;
+
+    return fluent.ScaffoldPage(
+      padding: EdgeInsets.zero,
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 顶部标题与操作
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                fluent.IconButton(
+                  icon: const Icon(fluent.FluentIcons.back),
+                  onPressed: _backToList,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isEditMode
+                            ? '已选择 ${_selectedTrackIds.length} 首'
+                            : playlist.name,
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (!_isEditMode && playlist.isDefault)
+                        const Text(
+                          '默认歌单',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (_isEditMode) ...[
+                  fluent.Button(
+                    onPressed: tracks.isNotEmpty ? _toggleSelectAll : null,
+                    child: Text(
+                      _selectedTrackIds.length == tracks.length ? '取消全选' : '全选',
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  fluent.FilledButton(
+                    onPressed: _selectedTrackIds.isNotEmpty ? _batchRemoveTracks : null,
+                    child: const Text('删除选中'),
+                  ),
+                  const SizedBox(width: 8),
+                  fluent.Button(
+                    onPressed: _toggleEditMode,
+                    child: const Text('取消'),
+                  ),
+                ] else ...[
+                  if (tracks.isNotEmpty) ...[
+                    fluent.IconButton(
+                      icon: const Icon(fluent.FluentIcons.edit),
+                      onPressed: _toggleEditMode,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  fluent.IconButton(
+                    icon: const Icon(fluent.FluentIcons.sync),
+                    onPressed: () async {
+                      print('🔘 [MyPage] 开始同步(Fluent): playlistId=${playlist.id}');
+                      fluent.displayInfoBar(
+                        context,
+                        builder: (context, close) => fluent.InfoBar(
+                          title: const Text('同步'),
+                          content: const Text('正在同步...'),
+                          severity: fluent.InfoBarSeverity.info,
+                          action: fluent.IconButton(
+                            icon: const Icon(fluent.FluentIcons.clear),
+                            onPressed: close,
+                          ),
+                        ),
+                      );
+                      final inserted = await _playlistService.syncPlaylist(playlist.id);
+                      if (!mounted) return;
+                      fluent.displayInfoBar(
+                        context,
+                        builder: (context, close) => fluent.InfoBar(
+                          title: const Text('同步完成'),
+                          content: Text('新增 $inserted 首'),
+                          severity: fluent.InfoBarSeverity.success,
+                          action: fluent.IconButton(
+                            icon: const Icon(fluent.FluentIcons.clear),
+                            onPressed: close,
+                          ),
+                        ),
+                      );
+                      await _playlistService.loadPlaylistTracks(playlist.id);
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+          // Removed Divider to avoid white line between header and content under acrylic/mica
+
+          // 内容
+          if (isLoading && tracks.isEmpty)
+            const Expanded(
+              child: Center(child: fluent.ProgressRing()),
+            )
+          else if (tracks.isEmpty)
+            Expanded(child: _buildFluentDetailEmptyState())
+          else ...[
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: _buildFluentDetailStatisticsCard(tracks.length),
+            ),
+            Expanded(
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                itemBuilder: (context, index) {
+                  final track = tracks[index];
+                  return _buildFluentTrackItem(track, index);
+                },
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemCount: tracks.length,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFluentDetailStatisticsCard(int count) {
+    return fluent.Card(
+      padding: const EdgeInsets.all(16.0),
+      child: Row(
+        children: [
+          const Icon(fluent.FluentIcons.music_in_collection, size: 20),
+          const SizedBox(width: 12),
+          const Text(
+            '歌曲',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(width: 6),
+          Text('共 $count 首'),
+          const Spacer(),
+          if (count > 0)
+            fluent.FilledButton(
+              onPressed: _playAll,
+              child: const Text('播放全部'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFluentTrackItem(PlaylistTrack item, int index) {
+    final theme = fluent.FluentTheme.of(context);
+    final trackKey = _getTrackKey(item);
+    final isSelected = _selectedTrackIds.contains(trackKey);
+
+    return fluent.Card(
+      padding: EdgeInsets.zero,
+      child: fluent.ListTile(
+        leading: _isEditMode
+            ? fluent.Checkbox(
+                checked: isSelected,
+                onChanged: (_) => _toggleTrackSelection(item),
+              )
+            : Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: CachedNetworkImage(
+                      imageUrl: item.picUrl,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                        width: 50,
+                        height: 50,
+                        color: theme.resources.controlAltFillColorSecondary,
+                      ),
+                      errorWidget: (context, url, error) => Container(
+                        width: 50,
+                        height: 50,
+                        color: theme.resources.controlAltFillColorSecondary,
+                        child: Icon(
+                          fluent.FluentIcons.music_in_collection,
+                          color: theme.resources.textFillColorTertiary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: theme.resources.controlFillColorTertiary,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(4),
+                        ),
+                      ),
+                      child: Text(
+                        '#${index + 1}',
+                        style: TextStyle(
+                          color: theme.resources.textFillColorSecondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+        title: Text(
+          item.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${item.artists} • ${item.album}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              _getSourceIcon(item.source),
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        trailing: _isEditMode
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  fluent.IconButton(
+                    icon: const Icon(fluent.FluentIcons.play),
+                    onPressed: () => _playDetailTrack(index),
+                  ),
+                  fluent.IconButton(
+                    icon: const Icon(fluent.FluentIcons.delete),
+                    onPressed: () => _confirmRemoveTrack(item),
+                  ),
+                ],
+              ),
+        onPressed: _isEditMode
+            ? () => _toggleTrackSelection(item)
+            : () => _playDetailTrack(index),
+      ),
+    );
+  }
+
+  Widget _buildFluentDetailEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(fluent.FluentIcons.music_in_collection, size: 64),
+          SizedBox(height: 16),
+          Text('歌单为空'),
+          SizedBox(height: 8),
+          Text('快去添加一些喜欢的歌曲吧', style: TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFluentPage(BuildContext context, bool isLoggedIn) {
+    // 未登录：提示登录
+    if (!isLoggedIn) {
+      return fluent.ScaffoldPage(
+        padding: EdgeInsets.zero,
+        content: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(fluent.FluentIcons.contact, size: 80),
+              const SizedBox(height: 24),
+              const Text('登录后查看更多', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              const Text('登录即可管理歌单和查看听歌统计'),
+              const SizedBox(height: 24),
+              fluent.FilledButton(
+                onPressed: () {
+                  showAuthDialog(context).then((_) {
+                    if (mounted) setState(() {});
+                  });
+                },
+                child: const Text('立即登录'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 详情视图：Fluent 组件实现
+    if (_selectedPlaylist != null) {
+      return _buildFluentPlaylistDetailPage(_selectedPlaylist!);
+    }
+
+    // 主视图：标题 + 内容（复用原有卡片和列表）
+    final brightness = switch (_themeManager.themeMode) {
+      ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+      ThemeMode.dark => Brightness.dark,
+      _ => Brightness.light,
+    };
+    final materialTheme = _themeManager.buildThemeData(brightness);
+
+    return fluent.ScaffoldPage(
+      padding: EdgeInsets.zero,
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Row(
+              children: const [
+                Text('我的', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+          // Removed Divider to avoid white line between header and content under acrylic/mica
+          Expanded(
+            child: Theme(
+              data: materialTheme,
+              child: Material(
+                color: Colors.transparent,
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    await _playlistService.loadPlaylists();
+                    await _loadStats();
+                  },
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildUserCard(materialTheme.colorScheme),
+                        const SizedBox(height: 16),
+                        // 听歌统计（Fluent 组件版本）
+                        if (_isLoadingStats)
+                          const fluent.Card(
+                            padding: EdgeInsets.all(16),
+                            child: Center(child: fluent.ProgressRing()),
+                          )
+                        else if (_statsData == null)
+                          fluent.InfoBar(
+                            title: const Text('暂无统计数据'),
+                            severity: fluent.InfoBarSeverity.info,
+                          )
+                        else
+                          _buildFluentStatsCard(),
+                        const SizedBox(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('我的歌单', style: Theme.of(context).textTheme.titleLarge),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                fluent.IconButton(
+                                  icon: const Icon(fluent.FluentIcons.cloud_download),
+                                  onPressed: _showImportPlaylistDialog,
+                                ),
+                                const SizedBox(width: 8),
+                                fluent.FilledButton(
+                                  onPressed: _showCreatePlaylistDialog,
+                                  child: const Text('新建'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _buildPlaylistsList(materialTheme.colorScheme),
+                        const SizedBox(height: 24),
+                        if (_statsData != null && _statsData!.playCounts.isNotEmpty) ...[
+                          Text('播放排行榜 Top 10', style: Theme.of(context).textTheme.titleLarge),
+                          const SizedBox(height: 8),
+                          _buildTopPlaysList(materialTheme.colorScheme),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFluentStatsCard() {
+    final stats = _statsData!;
+    return fluent.Card(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('听歌统计', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildFluentStatTile(
+                  icon: fluent.FluentIcons.time_picker,
+                  label: '累计时长',
+                  value: ListeningStatsService.formatDuration(stats.totalListeningTime),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildFluentStatTile(
+                  icon: fluent.FluentIcons.play,
+                  label: '播放次数',
+                  value: '${stats.totalPlayCount} 次',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFluentStatTile({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    final theme = fluent.FluentTheme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.resources.controlAltFillColorSecondary,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, color: theme.resources.textFillColorSecondary),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
         ],
       ),
     );
@@ -585,26 +1062,47 @@ class _MyPageState extends State<MyPage> {
   Future<void> _batchRemoveTracks() async {
     if (_selectedPlaylist == null || _selectedTrackIds.isEmpty) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('批量删除'),
-        content: Text('确定要删除选中的 ${_selectedTrackIds.length} 首歌曲吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.redAccent,
+    bool? confirmed;
+    if (_themeManager.isFluentFramework) {
+      confirmed = await fluent.showDialog<bool>(
+        context: context,
+        builder: (context) => fluent.ContentDialog(
+          title: const Text('批量删除'),
+          content: Text('确定要删除选中的 ${_selectedTrackIds.length} 首歌曲吗？'),
+          actions: [
+            fluent.Button(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
             ),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
+            fluent.FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('批量删除'),
+          content: Text('确定要删除选中的 ${_selectedTrackIds.length} 首歌曲吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+              ),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
+      );
+    }
 
     if (confirmed != true) return;
 
@@ -644,51 +1142,102 @@ class _MyPageState extends State<MyPage> {
 
   /// 显示创建歌单对话框
   void _showCreatePlaylistDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        String playlistName = '';
-        return AlertDialog(
-          title: const Text('新建歌单'),
-          content: TextField(
-            autofocus: true,
-            decoration: const InputDecoration(
-              hintText: '请输入歌单名称',
-              border: OutlineInputBorder(),
+    if (_themeManager.isFluentFramework) {
+      fluent.showDialog(
+        context: context,
+        builder: (context) {
+          final controller = TextEditingController();
+          String? err;
+          return fluent.ContentDialog(
+            title: const Text('新建歌单'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                fluent.TextBox(
+                  controller: controller,
+                  placeholder: '请输入歌单名称',
+                  autofocus: true,
+                ),
+                if (err != null) ...[
+                  const SizedBox(height: 8),
+                  fluent.InfoBar(title: Text(err!), severity: fluent.InfoBarSeverity.warning),
+                ],
+              ],
             ),
-            onChanged: (value) {
-              playlistName = value;
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                if (playlistName.trim().isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('歌单名称不能为空')),
-                  );
-                  return;
-                }
-
-                Navigator.pop(context);
-                await _playlistService.createPlaylist(playlistName.trim());
-
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('歌单「$playlistName」创建成功')),
-                  );
-                }
+            actions: [
+              fluent.Button(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              fluent.FilledButton(
+                onPressed: () async {
+                  final name = controller.text.trim();
+                  if (name.isEmpty) {
+                    err = '歌单名称不能为空';
+                    (context as Element).markNeedsBuild();
+                    return;
+                  }
+                  Navigator.pop(context);
+                  await _playlistService.createPlaylist(name);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('歌单「$name」创建成功')),
+                    );
+                  }
+                },
+                child: const Text('创建'),
+              ),
+            ],
+          );
+        },
+      );
+    } else {
+      showDialog(
+        context: context,
+        builder: (context) {
+          String playlistName = '';
+          return AlertDialog(
+            title: const Text('新建歌单'),
+            content: TextField(
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: '请输入歌单名称',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) {
+                playlistName = value;
               },
-              child: const Text('创建'),
             ),
-          ],
-        );
-      },
-    );
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  if (playlistName.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('歌单名称不能为空')),
+                    );
+                    return;
+                  }
+
+                  Navigator.pop(context);
+                  await _playlistService.createPlaylist(playlistName.trim());
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('歌单「$playlistName」创建成功')),
+                    );
+                  }
+                },
+                child: const Text('创建'),
+              ),
+            ],
+          );
+        },
+      );
+    }
   }
 
   /// 构建歌单详情
@@ -813,17 +1362,22 @@ class _MyPageState extends State<MyPage> {
             ),
           // 刷新按钮
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _playlistService.loadPlaylistTracks(playlist.id);
+            icon: const Icon(Icons.sync),
+            onPressed: () async {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('正在刷新...'),
+                  content: Text('正在同步...'),
                   duration: Duration(seconds: 1),
                 ),
               );
+              final inserted = await _playlistService.syncPlaylist(playlist.id);
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('同步完成，新增 $inserted 首')),
+              );
+              await _playlistService.loadPlaylistTracks(playlist.id);
             },
-            tooltip: '刷新',
+            tooltip: '同步',
           ),
         ],
       ],
@@ -1080,26 +1634,47 @@ class _MyPageState extends State<MyPage> {
   Future<void> _confirmRemoveTrack(PlaylistTrack track) async {
     if (_selectedPlaylist == null) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('移除歌曲'),
-        content: Text('确定要从歌单中移除「${track.name}」吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.redAccent,
+    bool? confirmed;
+    if (_themeManager.isFluentFramework) {
+      confirmed = await fluent.showDialog<bool>(
+        context: context,
+        builder: (context) => fluent.ContentDialog(
+          title: const Text('移除歌曲'),
+          content: Text('确定要从歌单中移除「${track.name}」吗？'),
+          actions: [
+            fluent.Button(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
             ),
-            child: const Text('移除'),
-          ),
-        ],
-      ),
-    );
+            fluent.FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('移除'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('移除歌曲'),
+          content: Text('确定要从歌单中移除「${track.name}」吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+              ),
+              child: const Text('移除'),
+            ),
+          ],
+        ),
+      );
+    }
 
     if (confirmed != true) return;
 

@@ -153,6 +153,8 @@ class UrlService extends ChangeNotifier {
   String get neteaseFmTrashUrl => '$baseUrl/fm_trash';
   String get neteasePersonalizedPlaylistsUrl => '$baseUrl/personalized';
   String get neteasePersonalizedNewsongUrl => '$baseUrl/personalized/newsong';
+  /// Aggregated For You endpoint
+  String get neteaseForYouUrl => '$baseUrl/recommend/for_you';
   // Netease playlist detail
   String get neteasePlaylistDetailUrl => '$baseUrl/playlist';
 
@@ -180,6 +182,13 @@ class UrlService extends ChangeNotifier {
 
   // Version API
   String get versionLatestUrl => '$baseUrl/version/latest';
+  
+  // Weather API
+  String get weatherUrl => '$baseUrl/weather';
+
+  // Pay API (backend proxy)
+  String get payCreateUrl => '$baseUrl/pay/create';
+  String get payQueryUrl => '$baseUrl/pay/query';
 
   /// 验证 URL 格式
   static bool isValidUrl(String url) {

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent_ui;
+import '../../widgets/fluent_settings_card.dart';
 import '../../services/auth_service.dart';
 import '../../services/netease_login_service.dart';
 import 'netease_qr_dialog.dart';
@@ -35,7 +37,11 @@ class _ThirdPartyAccountsState extends State<ThirdPartyAccounts> {
   }
 
   void _onAuthChanged() {
-    _refresh();
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _refresh();
+    });
   }
 
   @override
@@ -45,6 +51,71 @@ class _ThirdPartyAccountsState extends State<ThirdPartyAccounts> {
     // 如果未登录，不显示此组件
     if (user == null) {
       return const SizedBox.shrink();
+    }
+    final isFluent = fluent_ui.FluentTheme.maybeOf(context) != null;
+
+    if (isFluent) {
+      return FluentSettingsGroup(
+        title: '第三方账号',
+        children: [
+          // 提示信息（Fluent 风格）
+          fluent_ui.InfoBar(
+            title: const Text('提示'),
+            content: const Text('绑定第三方账号后，我们可以为您定制首页推荐内容'),
+            severity: fluent_ui.InfoBarSeverity.info,
+          ),
+          // 网易云音乐账号卡片
+          fluent_ui.Card(
+            padding: fluent_ui.EdgeInsets.zero,
+            child: FutureBuilder<Map<String, dynamic>>(
+              key: ValueKey(_refreshKey),
+              future: NeteaseLoginService().fetchBindings(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const fluent_ui.ListTile(
+                    leading: Icon(Icons.cloud, size: 20),
+                    title: Text('网易云音乐'),
+                    subtitle: Text('加载中...'),
+                    trailing: fluent_ui.ProgressRing(),
+                  );
+                }
+
+                final bindings = snapshot.data?['data'] as Map<String, dynamic>?;
+                final netease = bindings?['netease'] as Map<String, dynamic>?;
+                final bound = (netease != null) && (netease['bound'] == true);
+                final nickname = netease?['nickname'] as String?;
+                final avatarUrl = netease?['avatarUrl'] as String?;
+                final neteaseUserId = netease?['userId'] as String?;
+
+                return fluent_ui.ListTile(
+                  leading: avatarUrl != null
+                      ? CircleAvatar(backgroundImage: NetworkImage(avatarUrl))
+                      : const Icon(Icons.cloud, size: 20),
+                  title: const Text('网易云音乐'),
+                  subtitle: bound
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('昵称: ${nickname ?? '-'}'),
+                            Text('用户ID: ${neteaseUserId ?? '-'}'),
+                          ],
+                        )
+                      : const Text('未绑定'),
+                  trailing: bound
+                      ? fluent_ui.Button(
+                          onPressed: () => _showUnbindDialogFluent(context),
+                          child: const Text('解绑'),
+                        )
+                      : fluent_ui.FilledButton(
+                          onPressed: () => _bindNetease(context, user.id),
+                          child: const Text('去绑定'),
+                        ),
+                );
+              },
+            ),
+          ),
+        ],
+      );
     }
 
     return Column(
@@ -170,18 +241,37 @@ class _ThirdPartyAccountsState extends State<ThirdPartyAccounts> {
     );
   }
 
+  Future<bool> _waitUntilNeteaseBound({int maxAttempts = 6, Duration interval = const Duration(milliseconds: 500)}) async {
+    for (var i = 0; i < maxAttempts; i++) {
+      try {
+        final resp = await NeteaseLoginService().fetchBindings();
+        final data = resp['data'] as Map<String, dynamic>?;
+        final netease = data != null ? data['netease'] as Map<String, dynamic>? : null;
+        final bound = (netease != null) && (netease['bound'] == true);
+        if (bound) return true;
+      } catch (_) {}
+      await Future.delayed(interval);
+    }
+    return false;
+  }
+
   Future<void> _bindNetease(BuildContext context, int userId) async {
     final success = await showNeteaseQrDialog(context, userId);
     if (success == true) {
+      // 一些后端在返回 803 后需要数百毫秒写入绑定结果，这里短暂轮询确保 UI 能立即得到最新状态
+      await _waitUntilNeteaseBound();
       _refresh();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('网易云账号绑定成功！现在可以为您定制首页了'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        if (messenger != null) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('网易云账号绑定成功！现在可以为您定制首页了'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
       }
     }
   }
@@ -209,37 +299,43 @@ class _ThirdPartyAccountsState extends State<ThirdPartyAccounts> {
               
               // 显示加载提示
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Row(
-                      children: [
-                        SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Row(
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           ),
-                        ),
-                        SizedBox(width: 16),
-                        Text('正在解绑...'),
-                      ],
+                          SizedBox(width: 16),
+                          Text('正在解绑...'),
+                        ],
+                      ),
+                      duration: Duration(seconds: 2),
                     ),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
+                  );
+                }
               }
 
               final ok = await NeteaseLoginService().unbindNetease();
               
               if (context.mounted) {
-                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(ok ? '已解绑网易云账号' : '解绑失败，请重试'),
-                    backgroundColor: ok ? Colors.orange : Colors.red,
-                  ),
-                );
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.hideCurrentSnackBar();
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(ok ? '已解绑网易云账号' : '解绑失败，请重试'),
+                      backgroundColor: ok ? Colors.orange : Colors.red,
+                    ),
+                  );
+                }
                 
                 if (ok) {
                   _refresh();
@@ -249,6 +345,41 @@ class _ThirdPartyAccountsState extends State<ThirdPartyAccounts> {
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
+            child: const Text('解绑'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showUnbindDialogFluent(BuildContext context) {
+    fluent_ui.showDialog(
+      context: context,
+      builder: (context) => fluent_ui.ContentDialog(
+        title: const Text('解绑网易云账号'),
+        content: const Text('解绑后将无法为您定制首页推荐内容，确定要解绑吗？'),
+        actions: [
+          fluent_ui.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          fluent_ui.FilledButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final ok = await NeteaseLoginService().unbindNetease();
+              if (ok) {
+                _refresh();
+              }
+              final messenger = ScaffoldMessenger.maybeOf(context);
+              if (messenger != null) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(ok ? '已解绑网易云账号' : '解绑失败，请重试'),
+                    backgroundColor: ok ? Colors.orange : Colors.red,
+                  ),
+                );
+              }
+            },
             child: const Text('解绑'),
           ),
         ],

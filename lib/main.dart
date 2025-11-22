@@ -1,23 +1,27 @@
 import 'dart:io';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:window_manager/window_manager.dart';
-import 'layouts/main_layout.dart';
-import 'utils/theme_manager.dart';
-import 'services/player_service.dart';
-import 'services/system_media_service.dart';
-import 'services/tray_service.dart';
-import 'services/developer_mode_service.dart';
-import 'services/cache_service.dart';
-import 'services/permission_service.dart';
-import 'services/url_service.dart';
-import 'services/version_service.dart';
-import 'services/player_background_service.dart';
-import 'services/persistent_storage_service.dart';
-import 'services/listening_stats_service.dart';
-import 'services/desktop_lyric_service.dart';
-import 'services/android_floating_lyric_service.dart';
-import 'services/auto_update_service.dart';
+import 'package:cyrene_music/layouts/fluent_main_layout.dart';
+import 'package:cyrene_music/layouts/main_layout.dart';
+import 'package:cyrene_music/services/android_floating_lyric_service.dart';
+import 'package:cyrene_music/services/auto_update_service.dart';
+import 'package:cyrene_music/services/cache_service.dart';
+import 'package:cyrene_music/services/developer_mode_service.dart';
+import 'package:cyrene_music/services/desktop_lyric_service.dart';
+import 'package:cyrene_music/services/listening_stats_service.dart';
+import 'package:cyrene_music/services/persistent_storage_service.dart';
+import 'package:cyrene_music/services/player_background_service.dart';
+import 'package:cyrene_music/services/player_service.dart';
+import 'package:cyrene_music/services/notification_service.dart';
+import 'package:cyrene_music/services/permission_service.dart';
+import 'package:cyrene_music/services/system_media_service.dart';
+import 'package:cyrene_music/services/tray_service.dart';
+import 'package:cyrene_music/services/url_service.dart';
+import 'package:cyrene_music/services/version_service.dart';
+import 'package:cyrene_music/utils/theme_manager.dart';
+import 'package:flutter_acrylic/flutter_acrylic.dart';
 
 
 // 条件导入 flutter_displaymode（仅 Android）
@@ -43,6 +47,12 @@ void main() async {
   // 初始化 window_manager（必须在 runApp 之前）
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     await windowManager.ensureInitialized();
+    // 初始化窗口材质库（Windows）
+    if (Platform.isWindows) {
+      try {
+        await Window.initialize();
+      } catch (_) {}
+    }
     
     WindowOptions windowOptions = const WindowOptions(
       size: Size(1200, 800),
@@ -64,8 +74,6 @@ void main() async {
         await windowManager.setIcon('assets/icons/tray_icon.png');
       }
       
-      // 对于隐藏标题栏的窗口，确保以无边框模式运行，避免启动时不可见
-      await windowManager.setAsFrameless();
       await windowManager.show();
       await windowManager.focus();
       // 设置关闭窗口时不退出应用（会触发 onWindowClose 回调）
@@ -131,6 +139,9 @@ void main() async {
   ListeningStatsService().initialize();
   DeveloperModeService().addLog('📊 听歌统计服务已初始化');
   
+  // 初始化通知服务
+  await NotificationService().initialize();
+  
   // 初始化桌面歌词服务（仅Windows）
   if (Platform.isWindows) {
     await DesktopLyricService().initialize();
@@ -166,66 +177,59 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeManager = ThemeManager();
+
     return AnimatedBuilder(
-      animation: ThemeManager(),
+      animation: themeManager,
       builder: (context, _) {
+        final lightTheme = themeManager.buildThemeData(Brightness.light);
+        final darkTheme = themeManager.buildThemeData(Brightness.dark);
+
+        final useFluentLayout = Platform.isWindows && themeManager.isFluentFramework;
+
+        if (useFluentLayout) {
+          return fluent.FluentApp(
+            title: 'Cyrene Music',
+            debugShowCheckedModeBanner: false,
+            theme: themeManager.buildFluentThemeData(Brightness.light),
+            darkTheme: themeManager.buildFluentThemeData(Brightness.dark),
+            themeMode: _mapMaterialThemeMode(themeManager.themeMode),
+            scrollBehavior: const _FluentScrollBehavior(),
+            home: const FluentMainLayout(),
+          );
+        }
+
         return MaterialApp(
           title: 'Cyrene Music',
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-        // 使用 Material Design 3
-        useMaterial3: true,
-        // 字体
-        fontFamily: 'Microsoft YaHei',
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: ThemeManager().seedColor,
-          brightness: Brightness.light,
-        ),
-        // 卡片主题
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-          ),
-          color: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-        ),
-        // 导航栏主题
-        navigationRailTheme: NavigationRailThemeData(
-          indicatorShape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        // 字体
-        fontFamily: 'Microsoft YaHei',
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: ThemeManager().seedColor,
-          brightness: Brightness.dark,
-        ),
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-          ),
-          color: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-        ),
-        navigationRailTheme: const NavigationRailThemeData(
-          indicatorShape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-          ),
-        ),
-      ),
-      themeMode: ThemeManager().themeMode,
+          theme: lightTheme,
+          darkTheme: darkTheme,
+          themeMode: themeManager.themeMode,
       home: Platform.isWindows
           ? _WindowsRoundedContainer(child: const MainLayout())
           : const MainLayout(),
         );
       },
     );
+  }
+}
+
+fluent.ThemeMode _mapMaterialThemeMode(ThemeMode mode) {
+  switch (mode) {
+    case ThemeMode.light:
+      return fluent.ThemeMode.light;
+    case ThemeMode.dark:
+      return fluent.ThemeMode.dark;
+    case ThemeMode.system:
+      return fluent.ThemeMode.system;
+  }
+}
+class _FluentScrollBehavior extends MaterialScrollBehavior {
+  const _FluentScrollBehavior();
+
+  @override
+  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) {
+    return child;
   }
 }
 
@@ -283,8 +287,9 @@ class _WindowsRoundedContainerState extends State<_WindowsRoundedContainer> with
     final colorScheme = Theme.of(context).colorScheme;
     
     // 最大化时无边距和圆角，正常时有边距和圆角
-    return Padding(
+    return Container(
       padding: _isMaximized ? EdgeInsets.zero : const EdgeInsets.all(8.0),
+      color: Theme.of(context).colorScheme.background,
       child: Container(
         decoration: BoxDecoration(
           color: colorScheme.surface,

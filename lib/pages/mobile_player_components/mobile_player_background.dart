@@ -15,10 +15,7 @@ class MobilePlayerBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([
-        PlayerBackgroundService(),
-        PlayerService(), // 监听播放器状态变化，用于更新专辑封面
-      ]),
+      animation: PlayerBackgroundService(),
       builder: (context, child) {
         return _buildBackground();
       },

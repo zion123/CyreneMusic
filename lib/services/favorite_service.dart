@@ -122,11 +122,10 @@ class FavoriteService extends ChangeNotifier {
       notifyListeners();
 
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
       
       final response = await http.get(
         Uri.parse('$baseUrl/favorites'),
@@ -159,7 +158,7 @@ class FavoriteService extends ChangeNotifier {
         }
       } else if (response.statusCode == 401) {
         print('⚠️ [FavoriteService] 未授权，需要重新登录');
-        AuthService().logout();
+        await AuthService().handleUnauthorized();
       } else {
         throw Exception('HTTP ${response.statusCode}');
       }
@@ -180,11 +179,10 @@ class FavoriteService extends ChangeNotifier {
 
     try {
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
       final favoriteTrack = FavoriteTrack.fromTrack(track);
 
       final response = await http.post(
@@ -215,7 +213,7 @@ class FavoriteService extends ChangeNotifier {
         }
       } else if (response.statusCode == 401) {
         print('⚠️ [FavoriteService] 未授权，需要重新登录');
-        AuthService().logout();
+        await AuthService().handleUnauthorized();
         return false;
       } else {
         throw Exception('HTTP ${response.statusCode}');
@@ -235,11 +233,10 @@ class FavoriteService extends ChangeNotifier {
 
     try {
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
       final trackId = track.id.toString();
       final source = track.source.toString().split('.').last;
 
@@ -270,7 +267,7 @@ class FavoriteService extends ChangeNotifier {
         }
       } else if (response.statusCode == 401) {
         print('⚠️ [FavoriteService] 未授权，需要重新登录');
-        AuthService().logout();
+        await AuthService().handleUnauthorized();
         return false;
       } else {
         throw Exception('HTTP ${response.statusCode}');

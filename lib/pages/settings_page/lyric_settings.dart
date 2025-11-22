@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent_ui;
 import '../../widgets/desktop_lyric_settings.dart';
 import '../../widgets/android_floating_lyric_settings.dart';
+import '../../widgets/fluent_settings_card.dart';
 
 /// 歌词设置组件
 class LyricSettings extends StatelessWidget {
@@ -11,6 +13,10 @@ class LyricSettings extends StatelessWidget {
   Widget build(BuildContext context) {
     // 根据平台显示对应的歌词设置
     if (Platform.isWindows) {
+      final isFluent = fluent_ui.FluentTheme.maybeOf(context) != null;
+      if (isFluent) {
+        return const DesktopLyricSettings();
+      }
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

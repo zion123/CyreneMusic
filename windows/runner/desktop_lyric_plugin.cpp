@@ -43,6 +43,9 @@ void DesktopLyricPlugin::RegisterWithRegistrar(
       &flutter::StandardMethodCodec::GetInstance());
 
   auto plugin = std::make_unique<DesktopLyricPlugin>();
+  
+  // Store channel pointer in plugin for callbacks
+  plugin->method_channel_ = channel.get();
 
   channel->SetMethodCallHandler(
       [plugin_pointer = plugin.get()](const auto& call, auto result) {
@@ -58,7 +61,13 @@ void DesktopLyricPlugin::RegisterWithRegistrar(
 }
 
 DesktopLyricPlugin::DesktopLyricPlugin()
-    : lyric_window_(std::make_unique<DesktopLyricWindow>()) {
+    : lyric_window_(std::make_unique<DesktopLyricWindow>()),
+      method_channel_(nullptr) {
+  // Set playback control callback
+  lyric_window_->SetPlaybackControlCallback(
+      [this](const std::string& action) {
+        this->OnPlaybackControl(action);
+      });
 }
 
 DesktopLyricPlugin::~DesktopLyricPlugin() {
@@ -218,7 +227,43 @@ void DesktopLyricPlugin::HandleMethodCall(
     }
     result->Error("INVALID_ARGUMENT", "Missing 'transparent' argument");
     
+  } else if (method_name == "setSongInfo") {
+    // Set song info (title, artist, album cover)
+    const auto* arguments = std::get_if<flutter::EncodableMap>(method_call.arguments());
+    if (arguments) {
+      auto title_it = arguments->find(flutter::EncodableValue("title"));
+      auto artist_it = arguments->find(flutter::EncodableValue("artist"));
+      auto album_cover_it = arguments->find(flutter::EncodableValue("albumCover"));
+      
+      std::wstring title, artist, album_cover;
+      if (title_it != arguments->end()) {
+        title = StringToWString(std::get<std::string>(title_it->second));
+      }
+      if (artist_it != arguments->end()) {
+        artist = StringToWString(std::get<std::string>(artist_it->second));
+      }
+      if (album_cover_it != arguments->end()) {
+        album_cover = StringToWString(std::get<std::string>(album_cover_it->second));
+      }
+      
+      lyric_window_->SetSongInfo(title, artist, album_cover);
+      result->Success(flutter::EncodableValue(true));
+      return;
+    }
+    result->Error("INVALID_ARGUMENT", "Missing song info arguments");
+    
   } else {
     result->NotImplemented();
   }
+}
+
+void DesktopLyricPlugin::OnPlaybackControl(const std::string& action) {
+  if (method_channel_ == nullptr) return;
+  
+  // Invoke method on Flutter side
+  flutter::EncodableMap args;
+  args[flutter::EncodableValue("action")] = flutter::EncodableValue(action);
+  
+  method_channel_->InvokeMethod("onPlaybackControl", 
+                                std::make_unique<flutter::EncodableValue>(args));
 }
