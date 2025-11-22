@@ -14,6 +14,7 @@ import 'package:cyrene_music/services/listening_stats_service.dart';
 import 'package:cyrene_music/services/persistent_storage_service.dart';
 import 'package:cyrene_music/services/player_background_service.dart';
 import 'package:cyrene_music/services/player_service.dart';
+import 'package:cyrene_music/services/notification_service.dart';
 import 'package:cyrene_music/services/permission_service.dart';
 import 'package:cyrene_music/services/system_media_service.dart';
 import 'package:cyrene_music/services/tray_service.dart';
@@ -137,6 +138,9 @@ void main() async {
   // 初始化听歌统计服务
   ListeningStatsService().initialize();
   DeveloperModeService().addLog('📊 听歌统计服务已初始化');
+  
+  // 初始化通知服务
+  await NotificationService().initialize();
   
   // 初始化桌面歌词服务（仅Windows）
   if (Platform.isWindows) {

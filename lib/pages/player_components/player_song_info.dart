@@ -139,6 +139,7 @@ class PlayerSongInfo extends StatelessWidget {
                 color: titleColor,
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
+                fontFamily: 'SimHei', // 黑体加粗
               ),
               textAlign: TextAlign.center,
               maxLines: 2,
@@ -172,6 +173,7 @@ class PlayerSongInfo extends StatelessWidget {
                           style: TextStyle(
                             color: subtitleColor.withOpacity(0.6),
                             fontSize: 14,
+                            fontFamily: 'Microsoft YaHei', // 微软雅黑
                           ),
                           textAlign: TextAlign.center,
                           maxLines: 1,
@@ -213,6 +215,7 @@ class PlayerSongInfo extends StatelessWidget {
                   style: TextStyle(
                     color: baseColor.withOpacity(0.8),
                     fontSize: 18,
+                    fontFamily: 'Microsoft YaHei', // 微软雅黑
                   ),
                 ),
               ),

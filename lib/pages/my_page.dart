@@ -258,15 +258,36 @@ class _MyPageState extends State<MyPage> {
                     const SizedBox(width: 4),
                   ],
                   fluent.IconButton(
-                    icon: const Icon(fluent.FluentIcons.refresh),
-                    onPressed: () {
-                      _playlistService.loadPlaylistTracks(playlist.id);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('正在刷新...'),
-                          duration: Duration(seconds: 1),
+                    icon: const Icon(fluent.FluentIcons.sync),
+                    onPressed: () async {
+                      print('🔘 [MyPage] 开始同步(Fluent): playlistId=${playlist.id}');
+                      fluent.displayInfoBar(
+                        context,
+                        builder: (context, close) => fluent.InfoBar(
+                          title: const Text('同步'),
+                          content: const Text('正在同步...'),
+                          severity: fluent.InfoBarSeverity.info,
+                          action: fluent.IconButton(
+                            icon: const Icon(fluent.FluentIcons.clear),
+                            onPressed: close,
+                          ),
                         ),
                       );
+                      final inserted = await _playlistService.syncPlaylist(playlist.id);
+                      if (!mounted) return;
+                      fluent.displayInfoBar(
+                        context,
+                        builder: (context, close) => fluent.InfoBar(
+                          title: const Text('同步完成'),
+                          content: Text('新增 $inserted 首'),
+                          severity: fluent.InfoBarSeverity.success,
+                          action: fluent.IconButton(
+                            icon: const Icon(fluent.FluentIcons.clear),
+                            onPressed: close,
+                          ),
+                        ),
+                      );
+                      await _playlistService.loadPlaylistTracks(playlist.id);
                     },
                   ),
                 ],
@@ -1341,17 +1362,22 @@ class _MyPageState extends State<MyPage> {
             ),
           // 刷新按钮
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _playlistService.loadPlaylistTracks(playlist.id);
+            icon: const Icon(Icons.sync),
+            onPressed: () async {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('正在刷新...'),
+                  content: Text('正在同步...'),
                   duration: Duration(seconds: 1),
                 ),
               );
+              final inserted = await _playlistService.syncPlaylist(playlist.id);
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('同步完成，新增 $inserted 首')),
+              );
+              await _playlistService.loadPlaylistTracks(playlist.id);
             },
-            tooltip: '刷新',
+            tooltip: '同步',
           ),
         ],
       ],

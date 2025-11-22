@@ -15,6 +15,7 @@ import '../pages/my_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/developer_page.dart';
 import '../pages/auth/auth_page.dart';
+import '../pages/support_page.dart';
 import '../services/auth_service.dart';
 import '../services/auth_overlay_service.dart';
 import '../services/developer_mode_service.dart';
@@ -102,6 +103,15 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
       );
     }
 
+    // 支持（在设置上方展示）
+    items.add(
+      fluent_ui.PaneItem(
+        icon: _svgIcon('assets/ui/FluentColorHeart16.svg'),
+        title: const Text('支持'),
+        body: const SupportPage(),
+      ),
+    );
+
     return items;
   }
 
@@ -128,6 +138,8 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
     if (DeveloperModeService().isDeveloperMode) {
       children.add(const DeveloperPage());
     }
+    // 支持页（与 _paneItems 顺序保持一致）
+    children.add(const SupportPage());
     // footer: 设置
     children.add(const _DeferredSettingsPage());
     return children;
@@ -173,6 +185,11 @@ class _FluentMainLayoutState extends State<FluentMainLayout> with WindowListener
       if (mounted) {
         ThemeManager().initializeSystemColor(context);
       }
+    });
+
+    // 应用启动后验证持久化的登录状态
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AuthService().validateToken();
     });
   }
 

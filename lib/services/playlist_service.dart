@@ -15,6 +15,80 @@ class PlaylistService extends ChangeNotifier {
     AuthService().addListener(_onAuthChanged);
   }
 
+  /// 更新歌单导入配置
+  Future<bool> updateImportConfig(int playlistId, {
+    required String source,
+    required String sourcePlaylistId,
+  }) async {
+    if (!AuthService().isLoggedIn) return false;
+    try {
+      final baseUrl = UrlService().baseUrl;
+      final token = AuthService().token!;
+      final resp = await http.put(
+        Uri.parse('$baseUrl/playlists/$playlistId/import-config'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode({
+          'source': source,
+          'sourcePlaylistId': sourcePlaylistId,
+        }),
+      ).timeout(const Duration(seconds: 15));
+      if (resp.statusCode == 200) {
+        final idx = _playlists.indexWhere((p) => p.id == playlistId);
+        if (idx != -1) {
+          final p = _playlists[idx];
+          _playlists[idx] = Playlist(
+            id: p.id,
+            name: p.name,
+            isDefault: p.isDefault,
+            trackCount: p.trackCount,
+            createdAt: p.createdAt,
+            updatedAt: DateTime.now(),
+            source: source,
+            sourcePlaylistId: sourcePlaylistId,
+          );
+          notifyListeners();
+        }
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /// 触发服务端同步
+  Future<int> syncPlaylist(int playlistId) async {
+    if (!AuthService().isLoggedIn) return 0;
+    try {
+      final baseUrl = UrlService().baseUrl;
+      final token = AuthService().token!;
+      final url = '$baseUrl/playlists/$playlistId/sync';
+      print('🚀 [PlaylistService] 同步开始: $url (playlistId=$playlistId)');
+      final resp = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(minutes: 2));
+      print('📥 [PlaylistService] 同步响应: status=${resp.statusCode}');
+      if (resp.body.isNotEmpty) {
+        print('📄 [PlaylistService] 响应内容: ${resp.body}');
+      }
+      if (resp.statusCode == 200) {
+        final data = json.decode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+        final inserted = data['insertedCount'] as int? ?? 0;
+        print('✅ [PlaylistService] 同步完成，新增 $inserted 首');
+        return inserted;
+      }
+      print('⚠️ [PlaylistService] 同步失败: HTTP ${resp.statusCode}');
+    } catch (e) {
+      print('❌ [PlaylistService] 同步异常: $e');
+    }
+    return 0;
+  }
+
   List<Playlist> _playlists = [];
   List<Playlist> get playlists => _playlists;
 
@@ -75,11 +149,10 @@ class PlaylistService extends ChangeNotifier {
       notifyListeners();
 
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
 
       final response = await http.get(
         Uri.parse('$baseUrl/playlists'),
@@ -107,7 +180,7 @@ class PlaylistService extends ChangeNotifier {
         }
       } else if (response.statusCode == 401) {
         print('⚠️ [PlaylistService] 未授权，需要重新登录');
-        AuthService().logout();
+        await AuthService().handleUnauthorized();
       } else {
         throw Exception('HTTP ${response.statusCode}');
       }
@@ -133,11 +206,10 @@ class PlaylistService extends ChangeNotifier {
 
     try {
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
 
       final response = await http.post(
         Uri.parse('$baseUrl/playlists'),
@@ -167,7 +239,7 @@ class PlaylistService extends ChangeNotifier {
         }
       } else if (response.statusCode == 401) {
         print('⚠️ [PlaylistService] 未授权，需要重新登录');
-        AuthService().logout();
+        await AuthService().handleUnauthorized();
         return false;
       } else {
         throw Exception('HTTP ${response.statusCode}');
@@ -192,11 +264,10 @@ class PlaylistService extends ChangeNotifier {
 
     try {
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
 
       final response = await http.put(
         Uri.parse('$baseUrl/playlists/$playlistId'),
@@ -224,6 +295,8 @@ class PlaylistService extends ChangeNotifier {
               trackCount: _playlists[index].trackCount,
               createdAt: _playlists[index].createdAt,
               updatedAt: DateTime.now(),
+              source: _playlists[index].source,
+              sourcePlaylistId: _playlists[index].sourcePlaylistId,
             );
           }
 
@@ -255,11 +328,10 @@ class PlaylistService extends ChangeNotifier {
 
     try {
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
 
       final response = await http.delete(
         Uri.parse('$baseUrl/playlists/$playlistId'),
@@ -313,11 +385,10 @@ class PlaylistService extends ChangeNotifier {
 
     try {
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
       final playlistTrack = PlaylistTrack.fromTrack(track);
 
       final response = await http.post(
@@ -346,6 +417,8 @@ class PlaylistService extends ChangeNotifier {
               trackCount: _playlists[index].trackCount + 1,
               createdAt: _playlists[index].createdAt,
               updatedAt: DateTime.now(),
+              source: _playlists[index].source,
+              sourcePlaylistId: _playlists[index].sourcePlaylistId,
             );
           }
 
@@ -386,11 +459,10 @@ class PlaylistService extends ChangeNotifier {
       notifyListeners();
 
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
 
       final response = await http.get(
         Uri.parse('$baseUrl/playlists/$playlistId/tracks'),
@@ -439,11 +511,10 @@ class PlaylistService extends ChangeNotifier {
 
     try {
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
       final source = track.source.toString().split('.').last;
       
       // 诊断日志
@@ -488,6 +559,8 @@ class PlaylistService extends ChangeNotifier {
               trackCount: _playlists[index].trackCount - 1,
               createdAt: _playlists[index].createdAt,
               updatedAt: DateTime.now(),
+              source: _playlists[index].source,
+              sourcePlaylistId: _playlists[index].sourcePlaylistId,
             );
           }
 
@@ -531,11 +604,10 @@ class PlaylistService extends ChangeNotifier {
 
     try {
       final baseUrl = UrlService().baseUrl;
-      final userId = AuthService().currentUser?.id;
-      if (userId == null) {
-        throw Exception('无法获取用户ID');
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
       }
-      final token = 'user_$userId';
 
       // 构建删除列表
       final tracksToDelete = tracks.map((track) => {
@@ -577,6 +649,8 @@ class PlaylistService extends ChangeNotifier {
               trackCount: _playlists[index].trackCount - deletedCount,
               createdAt: _playlists[index].createdAt,
               updatedAt: DateTime.now(),
+              source: _playlists[index].source,
+              sourcePlaylistId: _playlists[index].sourcePlaylistId,
             );
           }
 
@@ -597,7 +671,7 @@ class PlaylistService extends ChangeNotifier {
         }
       } else if (response.statusCode == 401) {
         print('⚠️ [PlaylistService] 未授权，需要重新登录');
-        AuthService().logout();
+        await AuthService().handleUnauthorized();
         return 0;
       } else {
         throw Exception('HTTP ${response.statusCode}');

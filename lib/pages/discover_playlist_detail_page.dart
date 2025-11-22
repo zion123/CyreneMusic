@@ -6,16 +6,22 @@ import 'package:flutter_acrylic/flutter_acrylic.dart';
 import '../services/netease_discover_service.dart';
 import '../models/netease_discover.dart';
 import '../models/track.dart';
+import '../models/playlist.dart';
 import '../widgets/track_list_tile.dart';
 import '../services/playlist_queue_service.dart';
 import '../services/player_service.dart';
 import '../services/auth_service.dart';
 import '../pages/auth/auth_page.dart';
 import '../utils/theme_manager.dart';
+import 'package:http/http.dart' as http;
+import '../services/url_service.dart';
+import '../services/playlist_service.dart';
 
 class DiscoverPlaylistDetailPage extends StatelessWidget {
   final int playlistId;
-  const DiscoverPlaylistDetailPage({super.key, required this.playlistId});
+  final GlobalKey<_DiscoverPlaylistDetailContentState> _contentKey =
+      GlobalKey<_DiscoverPlaylistDetailContentState>();
+  DiscoverPlaylistDetailPage({super.key, required this.playlistId});
 
   @override
   Widget build(BuildContext context) {
@@ -33,8 +39,19 @@ class DiscoverPlaylistDetailPage extends StatelessWidget {
               elevation: 0,
               scrolledUnderElevation: 0,
               title: const Text('歌单详情'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.sync),
+                  tooltip: '同步到本地歌单',
+                  onPressed: () =>
+                      _contentKey.currentState?._syncToLocal(context, playlistId),
+                ),
+              ],
             ),
-            body: DiscoverPlaylistDetailContent(playlistId: playlistId),
+            body: DiscoverPlaylistDetailContent(
+              key: _contentKey,
+              playlistId: playlistId,
+            ),
           );
         },
       ),
@@ -190,6 +207,16 @@ class _DiscoverPlaylistDetailContentState
                             .map((t) => Chip(label: Text(t)))
                             .toList(),
                       ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          FilledButton.icon(
+                            onPressed: () => _syncToLocal(context, widget.playlistId),
+                            icon: const Icon(Icons.sync),
+                            label: const Text('同步到本地歌单'),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -252,6 +279,104 @@ class _DiscoverPlaylistDetailContentState
         ),
       ],
     );
+  }
+
+  Future<void> _syncToLocal(BuildContext context, int neteasePlaylistId) async {
+    if (!await _checkLoginStatus()) return;
+    final playlistService = PlaylistService();
+    if (playlistService.playlists.isEmpty) {
+      await playlistService.loadPlaylists();
+    }
+    if (!mounted) return;
+    final target = await showDialog<Playlist>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('选择目标歌单'),
+        content: SizedBox(
+          width: 420,
+          height: 360,
+          child: ListView.builder(
+            itemCount: playlistService.playlists.length,
+            itemBuilder: (context, index) {
+              final p = playlistService.playlists[index];
+              return ListTile(
+                leading: Icon(p.isDefault ? Icons.favorite : Icons.queue_music),
+                title: Text(p.name),
+                subtitle: Text('${p.trackCount} 首'),
+                onTap: () => Navigator.pop(context, p),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        ],
+      ),
+    );
+    if (target == null) return;
+    try {
+      final baseUrl = UrlService().baseUrl;
+      final token = AuthService().token;
+      if (token == null) throw Exception('未登录');
+      final headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      };
+      final putResp = await http
+          .put(
+            Uri.parse('$baseUrl/playlists/${target.id}/import-config'),
+            headers: headers,
+            body: '{"source":"netease","sourcePlaylistId":"$neteasePlaylistId"}',
+          )
+          .timeout(const Duration(seconds: 20));
+      if (putResp.statusCode != 200) {
+        throw Exception('绑定来源失败: HTTP ${putResp.statusCode}');
+      }
+      final postResp = await http
+          .post(
+            Uri.parse('$baseUrl/playlists/${target.id}/sync'),
+            headers: headers,
+          )
+          .timeout(const Duration(minutes: 2));
+      if (postResp.statusCode != 200) {
+        throw Exception('同步失败: HTTP ${postResp.statusCode}');
+      }
+      if (!mounted) return;
+      fluent.displayInfoBar(
+        context,
+        builder: (context, close) => fluent.InfoBar(
+          title: const Text('已开始同步'),
+          content: Text('目标歌单：${target.name}'),
+          action: fluent.IconButton(icon: const Icon(fluent.FluentIcons.clear), onPressed: close),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final themeManager = ThemeManager();
+      if (themeManager.isFluentFramework) {
+        await fluent.showDialog(
+          context: context,
+          builder: (context) => fluent.ContentDialog(
+            title: const Text('同步失败'),
+            content: Text('$e'),
+            actions: [
+              fluent.FilledButton(onPressed: () => Navigator.pop(context), child: const Text('确定')),
+            ],
+          ),
+        );
+      } else {
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('同步失败'),
+            content: Text('$e'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('确定')),
+            ],
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildFluentDetail(BuildContext context) {
@@ -407,6 +532,22 @@ class _DiscoverPlaylistDetailContentState
                     )
                     .cast<Widget>()
                     .toList(),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  fluent.FilledButton(
+                    onPressed: () => _syncToLocal(context, widget.playlistId),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(fluent.FluentIcons.sync),
+                        SizedBox(width: 6),
+                        Text('同步到本地歌单'),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

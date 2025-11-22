@@ -65,7 +65,7 @@ class PlayerPlaylistPanel extends StatelessWidget {
           width: 400,
           height: double.infinity,
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.7),
+            color: Colors.black.withOpacity(0.2),
             borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(16),
               bottomLeft: Radius.circular(16),
@@ -101,6 +101,7 @@ class PlayerPlaylistPanel extends StatelessWidget {
                         color: Colors.white,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
+                        fontFamily: 'Microsoft YaHei', // 微软雅黑
                       ),
                     ),
                     const Spacer(),
@@ -109,6 +110,7 @@ class PlayerPlaylistPanel extends StatelessWidget {
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.6),
                         fontSize: 14,
+                        fontFamily: 'Microsoft YaHei', // 微软雅黑
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -166,6 +168,7 @@ class PlayerPlaylistPanel extends StatelessWidget {
             style: TextStyle(
               color: Colors.white.withOpacity(0.6),
               fontSize: 16,
+              fontFamily: 'Microsoft YaHei', // 微软雅黑
             ),
           ),
         ],
@@ -208,6 +211,7 @@ class PlayerPlaylistPanel extends StatelessWidget {
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.5),
                           fontSize: 14,
+                          fontFamily: 'Microsoft YaHei', // 微软雅黑
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -260,6 +264,7 @@ class PlayerPlaylistPanel extends StatelessWidget {
                         color: isCurrentTrack ? Colors.white : Colors.white.withOpacity(0.9),
                         fontSize: 15,
                         fontWeight: isCurrentTrack ? FontWeight.bold : FontWeight.normal,
+                        fontFamily: 'Microsoft YaHei', // 微软雅黑
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -270,6 +275,7 @@ class PlayerPlaylistPanel extends StatelessWidget {
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.5),
                         fontSize: 13,
+                        fontFamily: 'Microsoft YaHei', // 微软雅黑
                       ),
                     ),
                   ],

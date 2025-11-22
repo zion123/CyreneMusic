@@ -8,6 +8,8 @@ class Playlist {
   final int trackCount; // 歌曲数量
   final DateTime createdAt;
   final DateTime updatedAt;
+  final String? source; // 来源平台：netease/qq
+  final String? sourcePlaylistId; // 来源歌单ID
 
   Playlist({
     required this.id,
@@ -16,6 +18,8 @@ class Playlist {
     required this.trackCount,
     required this.createdAt,
     required this.updatedAt,
+    this.source,
+    this.sourcePlaylistId,
   });
 
   factory Playlist.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,8 @@ class Playlist {
       trackCount: json['trackCount'] as int? ?? 0,
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
+      source: json['source'] as String?,
+      sourcePlaylistId: json['sourcePlaylistId'] as String?,
     );
   }
 
@@ -37,6 +43,8 @@ class Playlist {
       'trackCount': trackCount,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
+      'source': source,
+      'sourcePlaylistId': sourcePlaylistId,
     };
   }
 }

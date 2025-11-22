@@ -377,6 +377,12 @@ class _HomePageState extends State<HomePage>
   void _showUpdateDialog(VersionInfo versionInfo) {
     if (!mounted) return;
 
+    // 根据当前主题模式显示不同的对话框
+    if (_themeManager.isFluentFramework) {
+      _showUpdateDialogFluent(versionInfo);
+      return;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: !versionInfo.forceUpdate, // 强制更新时不能关闭对话框
@@ -490,19 +496,371 @@ class _HomePageState extends State<HomePage>
               child: const Text('忽略此版本'),
             ),
 
-          // 立即更新
+          // 立即更新/一键更新
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(context).pop();
-              _openDownloadUrl(versionInfo.downloadUrl);
+              final autoUpdateService = AutoUpdateService();
+              if (autoUpdateService.isPlatformSupported) {
+                // 支持自动更新的平台，显示进度对话框
+                _showUpdateProgressDialog(versionInfo);
+                await autoUpdateService.startUpdate(
+                  versionInfo: versionInfo,
+                  autoTriggered: false,
+                );
+              } else {
+                // 不支持自动更新的平台，打开下载链接
+                _openDownloadUrl(versionInfo.downloadUrl);
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blue,
               foregroundColor: Colors.white,
             ),
-            child: const Text('立即更新'),
+            child: Text(AutoUpdateService().isPlatformSupported ? '一键更新' : '立即更新'),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 显示更新提示对话框（Fluent UI 版本）
+  void _showUpdateDialogFluent(VersionInfo versionInfo) {
+    if (!mounted) return;
+
+    final isForceUpdate = versionInfo.forceUpdate;
+    final autoUpdateService = AutoUpdateService();
+    final platformSupported = autoUpdateService.isPlatformSupported;
+
+    fluent.showDialog(
+      context: context,
+      barrierDismissible: !isForceUpdate,
+      builder: (context) => fluent.ContentDialog(
+        title: const Text('发现新版本'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 版本信息
+            Text(
+              '最新版本: ${versionInfo.version}',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '当前版本: ${VersionService().currentVersion}',
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+
+            // 更新日志
+            const Text(
+              '更新内容：',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              versionInfo.changelog,
+              style: const TextStyle(fontSize: 14),
+            ),
+
+            // 强制更新提示
+            if (isForceUpdate) ...[
+              const SizedBox(height: 16),
+              fluent.InfoBar(
+                title: const Text('强制更新'),
+                content: const Text('此版本为强制更新，请立即更新'),
+                severity: fluent.InfoBarSeverity.warning,
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          // 稍后提醒（仅非强制更新时显示）
+          if (!isForceUpdate)
+            fluent.Button(
+              onPressed: () {
+                VersionService().markVersionReminded(versionInfo.version);
+                if (mounted) {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('本次启动将不再提醒，下次启动时会再次提示'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              child: const Text('稍后提醒'),
+            ),
+
+          // 忽略此版本（仅非强制更新时显示）
+          if (!isForceUpdate)
+            fluent.Button(
+              onPressed: () async {
+                await VersionService().ignoreCurrentVersion(versionInfo.version);
+                if (mounted) {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('已忽略版本 ${versionInfo.version}，有新版本时将再次提醒'),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              child: const Text('忽略此版本'),
+            ),
+
+          // 立即更新/一键更新
+          fluent.FilledButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              if (platformSupported) {
+                // 支持自动更新的平台，显示进度对话框
+                _showUpdateProgressDialogFluent(versionInfo);
+                await autoUpdateService.startUpdate(
+                  versionInfo: versionInfo,
+                  autoTriggered: false,
+                );
+              } else {
+                // 不支持自动更新的平台，打开下载链接
+                _openDownloadUrl(versionInfo.downloadUrl);
+              }
+            },
+            child: Text(platformSupported ? '一键更新' : '立即更新'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 显示更新进度对话框（Material Design 版本）
+  void _showUpdateProgressDialog(VersionInfo versionInfo) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.system_update_alt, color: Colors.blue),
+              SizedBox(width: 8),
+              Text('正在更新'),
+            ],
+          ),
+          content: AnimatedBuilder(
+            animation: AutoUpdateService(),
+            builder: (context, child) {
+              final service = AutoUpdateService();
+              final progress = service.progress;
+              final statusMessage = service.statusMessage;
+              final hasError = service.lastError != null;
+              final isUpdating = service.isUpdating;
+              final requiresRestart = service.requiresRestart;
+
+              // 如果更新完成或出错，自动关闭对话框
+              if (!isUpdating && mounted) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted && Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                    
+                    if (hasError) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('更新失败: ${service.lastError}'),
+                          backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 5),
+                        ),
+                      );
+                    } else if (requiresRestart) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('更新完成！应用即将重启...'),
+                          backgroundColor: Colors.green,
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    }
+                  }
+                });
+              }
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 状态消息
+                  Text(
+                    statusMessage,
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 进度条
+                  LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: Colors.grey[300],
+                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // 进度百分比
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${(progress * 100).toStringAsFixed(1)}%',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                      if (isUpdating)
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                    ],
+                  ),
+
+                  // 错误提示
+                  if (hasError) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline, color: Colors.red.shade700, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              service.lastError!,
+                              style: TextStyle(fontSize: 13, color: Colors.red.shade900),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 显示更新进度对话框（Fluent UI 版本）
+  void _showUpdateProgressDialogFluent(VersionInfo versionInfo) {
+    if (!mounted) return;
+
+    fluent.showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => fluent.ContentDialog(
+        title: const Text('正在更新'),
+        content: AnimatedBuilder(
+          animation: AutoUpdateService(),
+          builder: (context, child) {
+            final service = AutoUpdateService();
+            final progress = service.progress;
+            final statusMessage = service.statusMessage;
+            final hasError = service.lastError != null;
+            final isUpdating = service.isUpdating;
+            final requiresRestart = service.requiresRestart;
+
+            // 如果更新完成或出错，自动关闭对话框
+            if (!isUpdating && mounted) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && Navigator.of(context).canPop()) {
+                  Navigator.of(context).pop();
+                  
+                  if (hasError) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('更新失败: ${service.lastError}'),
+                        backgroundColor: Colors.red,
+                        duration: const Duration(seconds: 5),
+                      ),
+                    );
+                  } else if (requiresRestart) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('更新完成！应用即将重启...'),
+                        backgroundColor: Colors.green,
+                        duration: Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                }
+              });
+            }
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 状态消息
+                Text(
+                  statusMessage,
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 20),
+
+                // 进度条
+                fluent.ProgressBar(
+                  value: progress * 100,
+                ),
+                const SizedBox(height: 12),
+
+                // 进度百分比
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${(progress * 100).toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (isUpdating)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: fluent.ProgressRing(strokeWidth: 2),
+                      ),
+                  ],
+                ),
+
+                // 错误提示
+                if (hasError) ...[
+                  const SizedBox(height: 16),
+                  fluent.InfoBar(
+                    title: const Text('更新失败'),
+                    content: Text(service.lastError!),
+                    severity: fluent.InfoBarSeverity.error,
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -537,7 +895,12 @@ class _HomePageState extends State<HomePage>
       return true;
     }
 
-    // 显示提示并询问是否要登录
+    // 根据主题模式显示不同的对话框
+    if (_themeManager.isFluentFramework) {
+      return await _checkLoginStatusFluent();
+    }
+
+    // Material Design 版本的对话框
     final shouldLogin = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -568,6 +931,43 @@ class _HomePageState extends State<HomePage>
 
       // 返回登录是否成功
       return result == true && AuthService().isLoggedIn;
+    }
+
+    return false;
+  }
+
+  /// Fluent UI 版本的登录状态检查
+  Future<bool> _checkLoginStatusFluent() async {
+    // 显示 Fluent UI 风格的提示对话框
+    final shouldGoToSettings = await fluent.showDialog<bool>(
+      context: context,
+      builder: (context) => fluent.ContentDialog(
+        title: const Text('需要登录'),
+        content: const Text(
+          '此功能需要登录后才能使用。\n\n'
+          '请前往左侧菜单栏的「设置」页面进行登录。',
+        ),
+        actions: [
+          fluent.Button(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          fluent.FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('我知道了'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldGoToSettings == true && mounted) {
+      // 显示提示信息
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('请点击左侧菜单栏的「设置」进行登录'),
+          duration: Duration(seconds: 3),
+        ),
+      );
     }
 
     return false;

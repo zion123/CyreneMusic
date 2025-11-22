@@ -10,6 +10,7 @@ import '../pages/my_page.dart';
 import '../pages/local_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/developer_page.dart';
+import '../pages/support_page.dart';
 import '../services/auth_service.dart';
 import '../services/layout_preference_service.dart';
 import '../services/developer_mode_service.dart';
@@ -43,6 +44,7 @@ class _MainLayoutState extends State<MainLayout>
       const HistoryPage(),
       const LocalPage(), // 本地
       const MyPage(), // 我的（歌单+听歌统计）
+      const SupportPage(), // 支持
       const SettingsPage(),
     ];
 
@@ -54,11 +56,15 @@ class _MainLayoutState extends State<MainLayout>
     return pages;
   }
 
+  int get _supportIndex => _pages.indexWhere((w) => w is SupportPage);
+  int get _settingsIndex => _pages.indexWhere((w) => w is SettingsPage);
+
   Future<void> _openMoreBottomSheet(BuildContext context) async {
     await showModalBottomSheet(
       context: context,
       showDragHandle: true,
       builder: (context) {
+        final isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -87,20 +93,32 @@ class _MainLayoutState extends State<MainLayout>
                 title: const Text('设置'),
                 onTap: () {
                   Navigator.pop(context);
-                  setState(() => _selectedIndex = 5); // 设置
-                  PageVisibilityNotifier().setCurrentPage(5);
+                  final idx = _settingsIndex;
+                  setState(() => _selectedIndex = idx); // 设置
+                  PageVisibilityNotifier().setCurrentPage(idx);
                   // 触发开发者模式（与设置点击一致）
                   DeveloperModeService().onSettingsClicked();
                 },
               ),
+              if (isPortrait)
+                ListTile(
+                  leading: const Icon(Icons.favorite_outline),
+                  title: const Text('支持'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    final idx = _supportIndex;
+                    setState(() => _selectedIndex = idx); // 支持
+                    PageVisibilityNotifier().setCurrentPage(idx);
+                  },
+                ),
               if (DeveloperModeService().isDeveloperMode)
                 ListTile(
                   leading: const Icon(Icons.code),
                   title: const Text('Dev'),
                   onTap: () {
                     Navigator.pop(context);
-                    setState(() => _selectedIndex = 6);
-                    PageVisibilityNotifier().setCurrentPage(6);
+                    setState(() => _selectedIndex = _pages.length - 1);
+                    PageVisibilityNotifier().setCurrentPage(_pages.length - 1);
                   },
                 ),
             ],
@@ -125,6 +143,11 @@ class _MainLayoutState extends State<MainLayout>
       if (mounted) {
         ThemeManager().initializeSystemColor(context);
       }
+    });
+
+    // 应用启动后验证持久化的登录状态（Material 布局）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AuthService().validateToken();
     });
   }
 
@@ -164,9 +187,9 @@ class _MainLayoutState extends State<MainLayout>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           setState(() {
-            // 如果当前选中的是开发者页面但模式被关闭，切换到首页
-            if (_selectedIndex >= 6 &&
-                !DeveloperModeService().isDeveloperMode) {
+            // 如果当前选中的索引超出可用页面（例如从 Dev 切换为非 Dev），切换到首页
+            final maxIndex = _pages.length - 1;
+            if (_selectedIndex > maxIndex) {
               _selectedIndex = 0;
             }
           });
@@ -419,17 +442,55 @@ class _MainLayoutState extends State<MainLayout>
 
   Widget _buildGlassBottomNavigationBar(BuildContext context) {
     final orientation = MediaQuery.of(context).orientation;
-    final bool useGlass =
-        Platform.isAndroid || orientation == Orientation.portrait;
+    final bool useGlass = Platform.isAndroid || orientation == Orientation.portrait;
+
+    final bool isLandscape = orientation == Orientation.landscape;
+    final int supportIndex = _supportIndex;
+    final int myIndex = _pages.indexWhere((w) => w is MyPage);
+
+    // Build destinations: landscape adds Support tab before More
+    final List<NavigationDestination> destinations = [
+      const NavigationDestination(
+        icon: Icon(Icons.home_outlined),
+        selectedIcon: Icon(Icons.home),
+        label: '首页',
+      ),
+      const NavigationDestination(
+        icon: Icon(Icons.explore_outlined),
+        selectedIcon: Icon(Icons.explore),
+        label: '发现',
+      ),
+      const NavigationDestination(
+        icon: Icon(Icons.person_outlined),
+        selectedIcon: Icon(Icons.person),
+        label: '我的',
+      ),
+      if (isLandscape)
+        const NavigationDestination(
+          icon: Icon(Icons.favorite_outline),
+          selectedIcon: Icon(Icons.favorite),
+          label: '支持',
+        ),
+      const NavigationDestination(
+        icon: Icon(Icons.more_horiz),
+        selectedIcon: Icon(Icons.more_horiz),
+        label: '更多',
+      ),
+    ];
+
+    int navSelectedIndex() {
+      if (_selectedIndex == 0) return 0; // 首页
+      if (_selectedIndex == 1) return 1; // 发现
+      if (_selectedIndex == myIndex) return 2; // 我的
+      if (isLandscape && _selectedIndex == supportIndex) return 3; // 支持
+      return destinations.length - 1; // 更多
+    }
+
     final baseNav = NavigationBar(
-      selectedIndex: () {
-        if (_selectedIndex == 0) return 0; // 首页
-        if (_selectedIndex == 1) return 1; // 发现
-        if (_selectedIndex == 4) return 2; // 我的
-        return 3; // 其他 -> 更多
-      }(),
+      selectedIndex: navSelectedIndex(),
       onDestinationSelected: (int tabIndex) async {
-        if (tabIndex == 3) {
+        final int moreTab = destinations.length - 1;
+        if (tabIndex == moreTab) {
           await _openMoreBottomSheet(context);
           return;
         }
@@ -437,35 +498,15 @@ class _MainLayoutState extends State<MainLayout>
         int targetPageIndex = _selectedIndex;
         if (tabIndex == 0) targetPageIndex = 0; // 首页
         if (tabIndex == 1) targetPageIndex = 1; // 发现
-        if (tabIndex == 2) targetPageIndex = 4; // 我的
+        if (tabIndex == 2) targetPageIndex = myIndex; // 我的
+        if (isLandscape && tabIndex == 3) targetPageIndex = supportIndex; // 支持
 
         setState(() {
           _selectedIndex = targetPageIndex;
         });
         PageVisibilityNotifier().setCurrentPage(targetPageIndex);
       },
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(Icons.home_outlined),
-          selectedIcon: Icon(Icons.home),
-          label: '首页',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.explore_outlined),
-          selectedIcon: Icon(Icons.explore),
-          label: '发现',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.person_outlined),
-          selectedIcon: Icon(Icons.person),
-          label: '我的',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.more_horiz),
-          selectedIcon: Icon(Icons.more_horiz),
-          label: '更多',
-        ),
-      ],
+      destinations: destinations,
     );
 
     if (!useGlass) return baseNav;
@@ -614,7 +655,7 @@ class _MainLayoutState extends State<MainLayout>
                           selectedIndex: _selectedIndex,
                           onDestinationSelected: (int index) {
                             // 如果点击的是设置按钮，触发开发者模式检测
-                            if (index == 5) {
+                            if (index == _settingsIndex) {
                               DeveloperModeService().onSettingsClicked();
                             }
 
@@ -652,6 +693,11 @@ class _MainLayoutState extends State<MainLayout>
                               label: Text('我的'),
                             ),
                             const NavigationDrawerDestination(
+                              icon: Icon(Icons.favorite_outline),
+                              selectedIcon: Icon(Icons.favorite),
+                              label: Text('支持'),
+                            ),
+                            const NavigationDrawerDestination(
                               icon: Icon(Icons.settings_outlined),
                               selectedIcon: Icon(Icons.settings),
                               label: Text('设置'),
@@ -666,28 +712,9 @@ class _MainLayoutState extends State<MainLayout>
                         ),
                       ),
                     ),
-            ),
-          ),
-          // 底部用户头像入口（与原 trailing 行为一致）
-          Padding(
-            padding: const EdgeInsets.only(bottom: 20.0),
-            child: Tooltip(
-              message: AuthService().isLoggedIn ? '用户中心' : '登录',
-              child: InkWell(
-                onTap: _handleUserButtonTap,
-                borderRadius: BorderRadius.circular(28),
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: SizedBox(
-                    width: 56,
-                    height: 56,
-                    child: _buildUserAvatar(size: 40),
-                  ),
                 ),
               ),
-            ),
-          ),
-        ],
+          ],
       ),
     );
   }
@@ -719,6 +746,11 @@ class _MainLayoutState extends State<MainLayout>
         icon: Icons.person_outlined,
         selectedIcon: Icons.person,
         label: '我的',
+      ),
+      _CollapsedItem(
+        icon: Icons.favorite_outline,
+        selectedIcon: Icons.favorite,
+        label: '支持',
       ),
       _CollapsedItem(
         icon: Icons.settings_outlined,
@@ -754,7 +786,7 @@ class _MainLayoutState extends State<MainLayout>
               child: InkWell(
                 borderRadius: BorderRadius.circular(16),
                 onTap: () {
-                  if (index == 5) {
+                  if (index == _settingsIndex) {
                     DeveloperModeService().onSettingsClicked();
                   }
                   setState(() {
