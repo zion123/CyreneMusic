@@ -112,26 +112,7 @@ class MobilePlayerSongInfo extends StatelessWidget {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: picUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: picUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(
-                          color: Colors.grey[900],
-                          child: const Center(
-                            child: CircularProgressIndicator(
-                              color: Colors.white30,
-                            ),
-                          ),
-                        ),
-                        errorWidget: (context, url, error) => Container(
-                          color: Colors.grey[900],
-                          child: Icon(
-                            Icons.music_note,
-                            size: coverSize * 0.3,
-                            color: Colors.white30,
-                          ),
-                        ),
-                      )
+                    ? _buildOptimizedCover(picUrl, coverSize)
                     : Container(
                         color: Colors.grey[900],
                         child: Icon(
@@ -145,6 +126,39 @@ class MobilePlayerSongInfo extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  /// 构建优化的封面图片，优先使用预取的 Provider 避免重复加载
+  Widget _buildOptimizedCover(String imageUrl, double coverSize) {
+    // 优先使用播放前由列表项传入并已预取的 Provider，避免再次网络请求
+    final provider = PlayerService().currentCoverImageProvider;
+    if (provider != null) {
+      return Image(
+        image: provider,
+        fit: BoxFit.cover,
+      );
+    }
+    // 回退到 CachedNetworkImage（首次加载或 Provider 不可用时）
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      fit: BoxFit.cover,
+      placeholder: (context, url) => Container(
+        color: Colors.grey[900],
+        child: const Center(
+          child: CircularProgressIndicator(
+            color: Colors.white30,
+          ),
+        ),
+      ),
+      errorWidget: (context, url, error) => Container(
+        color: Colors.grey[900],
+        child: Icon(
+          Icons.music_note,
+          size: coverSize * 0.3,
+          color: Colors.white30,
+        ),
+      ),
     );
   }
 

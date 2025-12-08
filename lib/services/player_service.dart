@@ -457,12 +457,13 @@ class PlayerService extends ChangeNotifier {
         DeveloperModeService().addLog('🎶 [PlayerService] 准备播放 ${track.getSourceName()} 音乐');
         final platform = track.source == MusicSource.qq ? 'qq' : 'kugou';
         
-        // 移动端使用服务器代理，桌面端使用本地代理
-        final isMobile = Platform.isAndroid || Platform.isIOS;
+        // iOS 使用服务器代理，Android/桌面端使用本地代理（节省服务器带宽）
+        // Android 已配置 network_security_config.xml 允许 localhost HTTP 流量
+        final useServerProxy = Platform.isIOS;
         
-        if (isMobile) {
-          // 移动端：先尝试服务器代理流式播放，失败则下载后播放
-          DeveloperModeService().addLog('📱 [PlayerService] 移动端使用服务器代理');
+        if (useServerProxy) {
+          // iOS：使用服务器代理流式播放，失败则下载后播放
+          DeveloperModeService().addLog('📱 [PlayerService] iOS 使用服务器代理');
           final serverProxyUrl = _getServerProxyUrl(songDetail.url, platform);
           DeveloperModeService().addLog('🔗 [PlayerService] 服务器代理URL: ${serverProxyUrl.length > 80 ? '${serverProxyUrl.substring(0, 80)}...' : serverProxyUrl}');
           
@@ -482,8 +483,9 @@ class PlayerService extends ChangeNotifier {
             }
           }
         } else {
-          // 桌面端：使用本地代理
-          DeveloperModeService().addLog('🖥️ [PlayerService] 桌面端使用本地代理');
+          // Android/桌面端：使用本地代理
+          final platformName = Platform.isAndroid ? 'Android' : '桌面端';
+          DeveloperModeService().addLog('📱 [PlayerService] $platformName 使用本地代理');
           DeveloperModeService().addLog('🔍 [PlayerService] 本地代理状态: ${ProxyService().isRunning ? "运行中 (端口: ${ProxyService().port})" : "未运行"}');
           
           if (ProxyService().isRunning) {
@@ -1221,9 +1223,19 @@ class PlayerService extends ChangeNotifier {
     try {
       print('⏮️ [PlayerService] 尝试播放上一首...');
       
+      final mode = PlaybackModeService().currentMode;
+      
       // 优先使用播放队列
       if (PlaylistQueueService().hasQueue) {
-        final previousTrack = PlaylistQueueService().getPrevious();
+        Track? previousTrack;
+        
+        // 随机模式下使用洗牌序列的上一首
+        if (mode == PlaybackMode.shuffle) {
+          previousTrack = PlaylistQueueService().getRandomPrevious();
+        } else {
+          previousTrack = PlaylistQueueService().getPrevious();
+        }
+        
         if (previousTrack != null) {
           print('✅ [PlayerService] 从播放队列获取上一首: ${previousTrack.name}');
           final coverProvider = PlaylistQueueService().getCoverProvider(previousTrack);
