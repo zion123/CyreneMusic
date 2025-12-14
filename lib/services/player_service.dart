@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:palette_generator/palette_generator.dart';
+import 'package:media_kit/media_kit.dart' as mk;
 import 'color_extraction_service.dart';
 import '../models/song_detail.dart';
 import '../models/track.dart';
@@ -29,6 +30,7 @@ import 'local_library_service.dart';
 import 'playback_state_service.dart';
 import 'developer_mode_service.dart';
 import 'url_service.dart';
+import 'notification_service.dart';
 import 'dart:async' as async_lib;
 import 'dart:async' show TimeoutException;
 
@@ -48,6 +50,12 @@ class PlayerService extends ChangeNotifier {
   PlayerService._internal();
 
   final ap.AudioPlayer _audioPlayer = ap.AudioPlayer();
+  mk.Player? _mediaKitPlayer;
+  bool _useMediaKit = false;
+  async_lib.StreamSubscription<bool>? _mediaKitPlayingSub;
+  async_lib.StreamSubscription<Duration>? _mediaKitPositionSub;
+  async_lib.StreamSubscription<Duration?>? _mediaKitDurationSub;
+  async_lib.StreamSubscription<bool>? _mediaKitCompletedSub;
   
   PlayerState _state = PlayerState.idle;
   SongDetail? _currentSong;
@@ -228,12 +236,28 @@ class PlayerService extends ChangeNotifier {
   }
 
   /// 播放歌曲（通过Track对象）
+  /// [fromPlaylist] 是否来自歌单，如果是则检查 Apple Music 换源限制
   Future<void> playTrack(
     Track track, {
     AudioQuality? quality,
     ImageProvider? coverProvider,
+    bool fromPlaylist = false,
   }) async {
     try {
+      // 仅在歌单场景下检测 Apple Music 歌曲换源限制
+      // 搜索结果页可以直接播放（使用后端 Widevine 解密）
+      if (fromPlaylist && track.source == MusicSource.apple) {
+        print('🍎 [PlayerService] 检测到歌单中的 Apple Music 歌曲，需要换源才能播放');
+        _state = PlayerState.error;
+        _errorMessage = '由于Apple接口限制，通过该接口导入的音乐需要换源才能播放！';
+        _currentTrack = track;
+        notifyListeners();
+        
+        // 通知用户（通过回调或事件）
+        _notifyAppleMusicRestriction(track);
+        return;
+      }
+
       // 使用用户设置的音质，如果没有传入特定音质
       final selectedQuality = quality ?? AudioQualityService().currentQuality;
       print('🎵 [PlayerService] 播放音质: ${selectedQuality.toString()}');
@@ -440,6 +464,28 @@ class PlayerService extends ChangeNotifier {
         print('   ✅ 歌词获取成功');
       }
 
+      if (track.source == MusicSource.apple &&
+          !songDetail.url.contains('/apple/stream')) {
+        final baseUrl = UrlService().baseUrl;
+        final salableAdamId = Uri.encodeComponent(track.id.toString());
+        final decryptedStreamUrl =
+            '$baseUrl/apple/stream?salableAdamId=$salableAdamId';
+
+        songDetail = SongDetail(
+          id: songDetail.id,
+          name: songDetail.name,
+          pic: songDetail.pic,
+          arName: songDetail.arName,
+          alName: songDetail.alName,
+          level: songDetail.level,
+          size: songDetail.size,
+          url: decryptedStreamUrl,
+          lyric: songDetail.lyric,
+          tlyric: songDetail.tlyric,
+          source: songDetail.source,
+        );
+      }
+
       _currentSong = songDetail;
       
       await _updateCoverImage(songDetail.pic, notify: false);
@@ -451,15 +497,63 @@ class PlayerService extends ChangeNotifier {
       // 加载桌面/悬浮歌词
       _loadLyricsForFloatingDisplay();
 
+      // Apple Music 播放逻辑
+      // 如果 URL 是后端解密流端点（/apple/stream），流式播放并从响应头获取时长
+      // 如果 URL 是原始 HLS m3u8 流，桌面端使用 media_kit 播放
+      if (track.source == MusicSource.apple) {
+        final isDecryptedStream = songDetail.url.contains('/apple/stream');
+        
+        if (isDecryptedStream) {
+          // 使用后端解密流端点，流式播放
+          print('🔐 [PlayerService] Apple Music 使用解密流端点（流式播放）');
+          DeveloperModeService().addLog('🔐 [PlayerService] Apple Music 使用解密流端点');
+          try {
+            // 先通过 HEAD 请求获取音频时长
+            final durationMs = await _getAppleStreamDuration(songDetail.url);
+            if (durationMs != null && durationMs > 0) {
+              _duration = Duration(milliseconds: durationMs);
+              print('📏 [PlayerService] 从后端获取时长: ${_duration.inSeconds}s');
+              DeveloperModeService().addLog('📏 [PlayerService] 时长: ${_duration.inSeconds}s');
+              notifyListeners();
+            }
+            
+            // 流式播放
+            await _audioPlayer.play(ap.UrlSource(songDetail.url));
+            print('✅ [PlayerService] Apple Music 解密流播放成功');
+            DeveloperModeService().addLog('✅ [PlayerService] Apple Music 解密流播放成功');
+            return;
+          } catch (e) {
+            print('❌ [PlayerService] Apple Music 解密流播放失败: $e');
+            DeveloperModeService().addLog('❌ [PlayerService] Apple Music 解密流播放失败: $e');
+            _state = PlayerState.error;
+            _errorMessage = 'Apple Music 播放失败: $e';
+            notifyListeners();
+            return;
+          }
+        } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+          // 原始 HLS 流，桌面端使用 media_kit 播放（audioplayers/WindowsAudio 不支持 HLS）
+          await _playAppleWithMediaKit(songDetail);
+          return;
+        }
+        // 移动端继续使用下面的代理逻辑
+      }
+
       // 3. 播放音乐
-      if (track.source == MusicSource.qq || track.source == MusicSource.kugou) {
-        // QQ音乐和酷狗音乐需要代理播放
+      if (track.source == MusicSource.qq ||
+          track.source == MusicSource.kugou ||
+          track.source == MusicSource.apple) {
+        // 需要代理播放的平台
         DeveloperModeService().addLog('🎶 [PlayerService] 准备播放 ${track.getSourceName()} 音乐');
-        final platform = track.source == MusicSource.qq ? 'qq' : 'kugou';
+        final platform = track.source == MusicSource.qq
+            ? 'qq'
+            : track.source == MusicSource.kugou
+                ? 'kugou'
+                : 'apple';
         
         // iOS 使用服务器代理，Android/桌面端使用本地代理（节省服务器带宽）
         // Android 已配置 network_security_config.xml 允许 localhost HTTP 流量
-        final useServerProxy = Platform.isIOS;
+        // Apple Music 需要本地代理来处理 m3u8 及鉴权请求头
+        final useServerProxy = Platform.isIOS && platform != 'apple';
         
         if (useServerProxy) {
           // iOS：使用服务器代理流式播放，失败则下载后播放
@@ -499,19 +593,47 @@ class PlayerService extends ChangeNotifier {
             } catch (playError) {
               print('❌ [PlayerService] 本地代理播放失败: $playError');
               DeveloperModeService().addLog('❌ [PlayerService] 本地代理播放失败: $playError');
-              DeveloperModeService().addLog('🔄 [PlayerService] 尝试备用方案（下载后播放）');
-              final tempFilePath = await _downloadAndPlay(songDetail);
-              if (tempFilePath != null) {
-                _currentTempFilePath = tempFilePath;
+
+              if (platform == 'apple') {
+                // Apple Music 不支持“下载后播放”（m3u8 不是音频文件）
+                try {
+                  DeveloperModeService().addLog('🔄 [PlayerService] Apple 尝试直接播放原始 URL');
+                  await _audioPlayer.play(ap.UrlSource(songDetail.url));
+                } catch (e) {
+                  _state = PlayerState.error;
+                  _errorMessage = 'Apple Music 播放失败（本地代理/直连均失败）';
+                  notifyListeners();
+                  return;
+                }
+              } else {
+                DeveloperModeService().addLog('🔄 [PlayerService] 尝试备用方案（下载后播放）');
+                final tempFilePath = await _downloadAndPlay(songDetail);
+                if (tempFilePath != null) {
+                  _currentTempFilePath = tempFilePath;
+                }
               }
             }
           } else {
             // 本地代理不可用，使用下载后播放
             print('⚠️ [PlayerService] 本地代理不可用，使用备用方案（下载后播放）');
             DeveloperModeService().addLog('⚠️ [PlayerService] 本地代理不可用，使用备用方案（下载后播放）');
-            final tempFilePath = await _downloadAndPlay(songDetail);
-            if (tempFilePath != null) {
-              _currentTempFilePath = tempFilePath;
+
+            if (platform == 'apple') {
+              // Apple Music 不支持“下载后播放”（m3u8 不是音频文件）
+              try {
+                DeveloperModeService().addLog('🔄 [PlayerService] Apple 尝试直接播放原始 URL');
+                await _audioPlayer.play(ap.UrlSource(songDetail.url));
+              } catch (e) {
+                _state = PlayerState.error;
+                _errorMessage = 'Apple Music 播放失败（本地代理不可用且直连失败）';
+                notifyListeners();
+                return;
+              }
+            } else {
+              final tempFilePath = await _downloadAndPlay(songDetail);
+              if (tempFilePath != null) {
+                _currentTempFilePath = tempFilePath;
+              }
             }
           }
         }
@@ -523,7 +645,9 @@ class PlayerService extends ChangeNotifier {
       }
 
       // 4. 异步缓存歌曲（不阻塞播放）
-      if (!isCached) {
+      final shouldSkipCache = songDetail.source == MusicSource.apple ||
+          songDetail.url.toLowerCase().contains('.m3u8');
+      if (!isCached && !shouldSkipCache) {
         _cacheSongInBackground(track, songDetail, qualityStr);
       }
       
@@ -581,6 +705,119 @@ class PlayerService extends ChangeNotifier {
       DeveloperModeService().addLog('❌ [PlayerService] 代理下载异常: $e');
       return null;
     }
+  }
+
+  /// 下载 Apple Music 解密流到本地临时文件
+  /// 解决 audioplayers 直接播放 HTTP 流时无法获取时长的问题
+  Future<String?> _downloadAppleDecryptedStream(String streamUrl, dynamic trackId) async {
+    try {
+      print('📥 [PlayerService] 开始下载 Apple Music 解密流...');
+      DeveloperModeService().addLog('📥 [PlayerService] 开始下载 Apple Music 解密流');
+      
+      // 获取临时目录
+      final tempDir = await getTemporaryDirectory();
+      final tempFilePath = '${tempDir.path}/apple_${trackId}_decrypted.mp3';
+      
+      // 检查是否已有缓存文件
+      final cachedFile = File(tempFilePath);
+      if (await cachedFile.exists()) {
+        final fileSize = await cachedFile.length();
+        // 有效文件大小：100KB - 50MB
+        if (fileSize > 100 * 1024 && fileSize < 50 * 1024 * 1024) {
+          print('✅ [PlayerService] 使用缓存的 Apple Music 文件: ${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB');
+          DeveloperModeService().addLog('✅ [PlayerService] 使用缓存文件: ${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB');
+          return tempFilePath;
+        } else {
+          // 文件大小异常，删除重新下载
+          await cachedFile.delete();
+        }
+      }
+      
+      // 下载解密流
+      final response = await http.get(
+        Uri.parse(streamUrl),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      ).timeout(
+        const Duration(minutes: 2), // 解密可能需要较长时间
+        onTimeout: () {
+          throw TimeoutException('下载超时');
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        // 保存到临时文件
+        final file = File(tempFilePath);
+        await file.writeAsBytes(response.bodyBytes);
+        final fileSizeMB = (response.bodyBytes.length / 1024 / 1024).toStringAsFixed(2);
+        print('✅ [PlayerService] Apple Music 解密流下载完成: $fileSizeMB MB');
+        DeveloperModeService().addLog('✅ [PlayerService] 解密流下载完成: $fileSizeMB MB');
+        return tempFilePath;
+      } else {
+        print('❌ [PlayerService] Apple Music 解密流下载失败: HTTP ${response.statusCode}');
+        DeveloperModeService().addLog('❌ [PlayerService] 解密流下载失败: HTTP ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      print('❌ [PlayerService] Apple Music 解密流下载异常: $e');
+      DeveloperModeService().addLog('❌ [PlayerService] 解密流下载异常: $e');
+      return null;
+    }
+  }
+
+  /// 通过 HEAD 请求获取 Apple Music 解密流的时长（毫秒）
+  Future<int?> _getAppleStreamDuration(String streamUrl) async {
+    try {
+      // 发送 HEAD 请求获取响应头
+      final request = http.Request('HEAD', Uri.parse(streamUrl));
+      request.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+      
+      final client = http.Client();
+      try {
+        final response = await client.send(request).timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            throw TimeoutException('HEAD 请求超时');
+          },
+        );
+        
+        // 从响应头获取时长（毫秒）
+        final durationMsStr = response.headers['x-duration-ms'];
+        if (durationMsStr != null) {
+          final durationMs = int.tryParse(durationMsStr);
+          if (durationMs != null && durationMs > 0) {
+            return durationMs;
+          }
+        }
+        
+        // 备用：从 X-Content-Duration（秒）获取
+        final durationSecStr = response.headers['x-content-duration'];
+        if (durationSecStr != null) {
+          final durationSec = double.tryParse(durationSecStr);
+          if (durationSec != null && durationSec > 0) {
+            return (durationSec * 1000).round();
+          }
+        }
+        
+        return null;
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      print('⚠️ [PlayerService] 获取 Apple Music 时长失败: $e');
+      return null;
+    }
+  }
+
+  /// 通知用户 Apple Music 歌曲需要换源才能播放
+  void _notifyAppleMusicRestriction(Track track) {
+    NotificationService().showNotification(
+      id: DateTime.now().millisecondsSinceEpoch % 100000,
+      title: 'Apple Music 播放限制',
+      body: '由于Apple接口限制，"${track.name}" 需要换源才能播放！',
+    );
+    print('🍎 [PlayerService] 已发送 Apple Music 换源提示通知');
   }
 
   /// 下载音频文件并播放（用于QQ音乐和酷狗音乐）
@@ -850,7 +1087,11 @@ class PlayerService extends ChangeNotifier {
   /// 暂停
   Future<void> pause() async {
     try {
-      await _audioPlayer.pause();
+      if (_useMediaKit && _mediaKitPlayer != null) {
+        await _mediaKitPlayer!.pause();
+      } else {
+        await _audioPlayer.pause();
+      }
       _pauseListeningTimeTracking();
       print('⏸️ [PlayerService] 暂停播放');
     } catch (e) {
@@ -861,7 +1102,11 @@ class PlayerService extends ChangeNotifier {
   /// 继续播放
   Future<void> resume() async {
     try {
-      await _audioPlayer.resume();
+      if (_useMediaKit && _mediaKitPlayer != null) {
+        await _mediaKitPlayer!.play();
+      } else {
+        await _audioPlayer.resume();
+      }
       _startListeningTimeTracking();
       print('▶️ [PlayerService] 继续播放');
     } catch (e) {
@@ -872,7 +1117,11 @@ class PlayerService extends ChangeNotifier {
   /// 停止
   Future<void> stop() async {
     try {
-      await _audioPlayer.stop();
+      if (_useMediaKit && _mediaKitPlayer != null) {
+        await _mediaKitPlayer!.stop();
+      } else {
+        await _audioPlayer.stop();
+      }
       
       // 清理临时文件
       await _cleanupCurrentTempFile();
@@ -897,7 +1146,11 @@ class PlayerService extends ChangeNotifier {
   /// 跳转到指定位置
   Future<void> seek(Duration position) async {
     try {
-      await _audioPlayer.seek(position);
+      if (_useMediaKit && _mediaKitPlayer != null) {
+        await _mediaKitPlayer!.seek(position);
+      } else {
+        await _audioPlayer.seek(position);
+      }
       print('⏩ [PlayerService] 跳转到: ${position.inSeconds}s');
     } catch (e) {
       print('❌ [PlayerService] 跳转失败: $e');
@@ -908,13 +1161,95 @@ class PlayerService extends ChangeNotifier {
   Future<void> setVolume(double volume) async {
     try {
       final clampedVolume = volume.clamp(0.0, 1.0);
-      await _audioPlayer.setVolume(clampedVolume);
+      if (_useMediaKit && _mediaKitPlayer != null) {
+        await _mediaKitPlayer!.setVolume(clampedVolume * 100);
+      } else {
+        await _audioPlayer.setVolume(clampedVolume);
+      }
       _volume = clampedVolume;
       notifyListeners(); // 通知监听器音量已改变
       print('🔊 [PlayerService] 音量设置为: ${(clampedVolume * 100).toInt()}%');
     } catch (e) {
       print('❌ [PlayerService] 音量设置失败: $e');
     }
+  }
+
+  Future<void> _ensureMediaKitPlayer() async {
+    if (_mediaKitPlayer != null) return;
+    _mediaKitPlayer = mk.Player(
+      configuration: const mk.PlayerConfiguration(
+        title: 'Cyrene Music',
+        ready: null,
+      ),
+    );
+
+    _mediaKitPlayingSub = _mediaKitPlayer!.stream.playing.listen((playing) {
+      if (playing) {
+        _state = PlayerState.playing;
+        _startListeningTimeTracking();
+        _startStateSaveTimer();
+        if (Platform.isWindows) {
+          DesktopLyricService().setPlayingState(true);
+        }
+      } else {
+        if (_state == PlayerState.playing) {
+          _state = PlayerState.paused;
+          _pauseListeningTimeTracking();
+          _saveCurrentPlaybackState();
+          _stopStateSaveTimer();
+          if (Platform.isWindows) {
+            DesktopLyricService().setPlayingState(false);
+          }
+        }
+      }
+      notifyListeners();
+    });
+
+    _mediaKitPositionSub = _mediaKitPlayer!.stream.position.listen((position) {
+      _position = position;
+      _updateFloatingLyric();
+      notifyListeners();
+    });
+
+    _mediaKitDurationSub = _mediaKitPlayer!.stream.duration.listen((duration) {
+      _duration = duration ?? Duration.zero;
+      notifyListeners();
+    });
+
+    _mediaKitCompletedSub = _mediaKitPlayer!.stream.completed.listen((completed) {
+      if (completed) {
+        _state = PlayerState.idle;
+        _position = Duration.zero;
+        _pauseListeningTimeTracking();
+        _stopStateSaveTimer();
+        if (Platform.isWindows) {
+          DesktopLyricService().setPlayingState(false);
+        }
+        notifyListeners();
+        _playNextFromHistory();
+      }
+    });
+  }
+
+  Future<void> _playAppleWithMediaKit(SongDetail songDetail) async {
+    await _ensureMediaKitPlayer();
+    _useMediaKit = true;
+
+    try {
+      // 避免与 audioplayers 同时占用设备
+      await _audioPlayer.stop();
+    } catch (_) {}
+
+    final url = ProxyService().isRunning
+        ? ProxyService().getProxyUrl(songDetail.url, 'apple')
+        : songDetail.url;
+
+    _state = PlayerState.loading;
+    notifyListeners();
+
+    await _mediaKitPlayer!.setVolume(_volume * 100);
+    await _mediaKitPlayer!.open(mk.Media(url));
+    await _mediaKitPlayer!.play();
   }
 
   /// 切换播放/暂停
@@ -1194,7 +1529,9 @@ class PlayerService extends ChangeNotifier {
           print('✅ [PlayerService] 从播放队列获取下一首: ${nextTrack.name}');
           await Future.delayed(const Duration(milliseconds: 500));
           final coverProvider = PlaylistQueueService().getCoverProvider(nextTrack);
-          await playTrack(nextTrack, coverProvider: coverProvider);
+          // 如果队列来源是歌单，传递 fromPlaylist: true
+          final isFromPlaylist = PlaylistQueueService().source == QueueSource.playlist;
+          await playTrack(nextTrack, coverProvider: coverProvider, fromPlaylist: isFromPlaylist);
           return;
         } else {
           print('ℹ️ [PlayerService] 队列已播放完毕，清空队列');
@@ -1202,7 +1539,7 @@ class PlayerService extends ChangeNotifier {
         }
       }
       
-      // 如果没有队列，使用播放历史
+      // 如果没有队列，使用播放历史（不检查换源限制）
       final nextTrack = PlayHistoryService().getNextTrack();
       
       if (nextTrack != null) {
@@ -1239,7 +1576,9 @@ class PlayerService extends ChangeNotifier {
         if (previousTrack != null) {
           print('✅ [PlayerService] 从播放队列获取上一首: ${previousTrack.name}');
           final coverProvider = PlaylistQueueService().getCoverProvider(previousTrack);
-          await playTrack(previousTrack, coverProvider: coverProvider);
+          // 如果队列来源是歌单，传递 fromPlaylist: true
+          final isFromPlaylist = PlaylistQueueService().source == QueueSource.playlist;
+          await playTrack(previousTrack, coverProvider: coverProvider, fromPlaylist: isFromPlaylist);
           return;
         }
       }
@@ -1273,7 +1612,9 @@ class PlayerService extends ChangeNotifier {
           print('✅ [PlayerService] 从播放队列随机选择: ${randomTrack.name}');
           await Future.delayed(const Duration(milliseconds: 500));
           final coverProvider = PlaylistQueueService().getCoverProvider(randomTrack);
-          await playTrack(randomTrack, coverProvider: coverProvider);
+          // 如果队列来源是歌单，传递 fromPlaylist: true
+          final isFromPlaylist = PlaylistQueueService().source == QueueSource.playlist;
+          await playTrack(randomTrack, coverProvider: coverProvider, fromPlaylist: isFromPlaylist);
           return;
         }
       }

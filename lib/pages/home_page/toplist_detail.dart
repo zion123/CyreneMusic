@@ -3,12 +3,23 @@ import 'dart:ui';
 
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cyrene_music/models/track.dart';
 import 'package:cyrene_music/models/toplist.dart';
 import 'package:cyrene_music/widgets/track_list_tile.dart';
+import 'package:cyrene_music/utils/theme_manager.dart';
+import 'package:cyrene_music/services/player_service.dart';
+import 'package:cyrene_music/services/auth_service.dart';
+import 'package:cyrene_music/pages/auth/auth_page.dart';
 import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 
 /// 显示榜单详情
 void showToplistDetail(BuildContext context, Toplist toplist) {
+  if (ThemeManager().isFluentFramework) {
+    _showToplistDetailSidebarFluent(context, toplist);
+    return;
+  }
+
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     // 桌面端：从左侧弹出侧边栏
     _showToplistDetailSidebar(context, toplist);
@@ -16,6 +27,95 @@ void showToplistDetail(BuildContext context, Toplist toplist) {
     // 移动端：从底部弹出抽屉
     _showToplistDetailBottomSheet(context, toplist);
   }
+}
+
+/// 桌面端：从左侧弹出侧边栏（Fluent UI 样式）
+void _showToplistDetailSidebarFluent(BuildContext context, Toplist toplist) {
+  final fluentTheme = fluent.FluentTheme.of(context);
+  
+  showGeneralDialog(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: 'Dismiss',
+    barrierColor: Colors.transparent, 
+    transitionDuration: const Duration(milliseconds: 300),
+    pageBuilder: (context, animation, secondaryAnimation) {
+      final curvedAnimation = CurvedAnimation(
+        parent: animation,
+        curve: fluent.Curves.easeOut,
+        reverseCurve: fluent.Curves.easeIn,
+      );
+
+      return Stack(
+        children: [
+          // 模糊遮罩
+          Padding(
+            padding: const EdgeInsets.all(0),
+            child: FadeTransition(
+              opacity: curvedAnimation,
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20.0, sigmaY: 20.0),
+                  child: Container(
+                    color: Colors.black.withOpacity(0.2), 
+                  ),
+                ),
+              ),
+            ),
+          ),
+          
+          // 侧边栏内容
+          SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(-1.0, 0.0),
+              end: Offset.zero,
+            ).animate(curvedAnimation),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 0, bottom: 0, left: 0), 
+                child: Container(
+                  width: 420,
+                  height: double.infinity,
+                  decoration: BoxDecoration(
+                    color: fluentTheme.micaBackgroundColor,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 24,
+                        offset: const Offset(4, 0),
+                      ),
+                    ],
+                    border: Border(
+                      right: BorderSide(
+                        color: fluentTheme.resources.surfaceStrokeColorDefault,
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  child: _ToplistDetailContentFluent(toplist: toplist),
+                ),
+              ),
+            ),
+          ),
+
+          // 标题栏拖动区 (Overlay)
+          if (Platform.isWindows)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 40,
+              child: MoveWindow(child: Container(color: Colors.transparent)),
+            ),
+        ],
+      );
+    },
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
+      return child!;
+    },
+  );
 }
 
 /// 桌面端：从左侧弹出侧边栏（Material Design 3 样式 + 高斯模糊背景）
@@ -174,6 +274,244 @@ void _showToplistDetailBottomSheet(BuildContext context, Toplist toplist) {
       },
     ),
   );
+}
+
+/// 构建榜单详情内容（Fluent UI 样式）
+class _ToplistDetailContentFluent extends StatelessWidget {
+  final Toplist toplist;
+  const _ToplistDetailContentFluent({required this.toplist});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = fluent.FluentTheme.of(context);
+    
+    return Column(
+      children: [
+        // 头部
+        Container(
+          padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 封面
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                     BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CachedNetworkImage(
+                    imageUrl: toplist.coverImgUrl,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      toplist.name,
+                      style: theme.typography.subtitle?.copyWith(fontWeight: FontWeight.bold),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                       children: [
+                        Icon(fluent.FluentIcons.contact, size: 14, color: theme.resources.textFillColorSecondary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            toplist.creator,
+                            style: theme.typography.caption?.copyWith(color: theme.resources.textFillColorSecondary),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${toplist.trackCount} songs',
+                      style: theme.typography.caption?.copyWith(color: theme.resources.textFillColorTertiary),
+                    ),
+                  ],
+                ),
+              ),
+              // 关闭按钮
+              fluent.Tooltip(
+                message: '关闭',
+                child: fluent.IconButton(
+                  icon: const Icon(fluent.FluentIcons.chrome_close, size: 14),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        // 分隔线
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Container(height: 1, color: theme.resources.cardStrokeColorDefault),
+        ),
+
+        // 列表
+        Expanded(
+          child: fluent.ListView.builder(
+             padding: const EdgeInsets.symmetric(vertical: 12),
+             itemCount: toplist.tracks.length,
+             itemBuilder: (context, index) {
+               return _FluentTrackListTile(
+                 track: toplist.tracks[index],
+                 index: index,
+               );
+             },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FluentTrackListTile extends StatefulWidget {
+  final Track track;
+  final int index;
+  
+  const _FluentTrackListTile({
+    required this.track,
+    required this.index,
+  });
+
+  @override
+  State<_FluentTrackListTile> createState() => _FluentTrackListTileState();
+}
+
+class _FluentTrackListTileState extends State<_FluentTrackListTile> {
+  // 复用 track_list_tile.dart 中的登录检查逻辑
+  Future<bool> _checkLoginStatus() async {
+     if (AuthService().isLoggedIn) return true;
+     
+     // Fluent UI Dialog
+     final result = await fluent.showDialog<bool>(
+       context: context,
+       builder: (context) => fluent.ContentDialog(
+         title: const Text('需要登录'),
+         content: const Text('此功能需要登录后才能使用，请先登录。'),
+         actions: [
+            fluent.Button(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            fluent.FilledButton(
+               onPressed: () => Navigator.pop(context, true),
+               child: const Text('去登录'),
+            )
+         ],
+       ),
+     );
+     
+     if (result == true && mounted) {
+        // 假设 showAuthDialog 是全局可用的，或者我们需要引入它
+        // 由于是独立文件，我们需要确认 showAuthDialog 的可用性
+        // 它在 auth_page.dart 中定义，我们有 import
+        final authResult = await showAuthDialog(context);
+        return authResult == true && AuthService().isLoggedIn;
+     }
+     return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = fluent.FluentTheme.of(context);
+    final isTop3 = widget.index < 3;
+    final rankColor = isTop3 ? theme.accentColor : theme.resources.textFillColorSecondary;
+
+    return fluent.ListTile.selectable(
+      selectionMode: fluent.ListTileSelectionMode.none,
+      onPressed: () async {
+         if (await _checkLoginStatus() && mounted) {
+             PlayerService().playTrack(widget.track);
+             // 简单的 toast
+             _showToast(context, '正在加载: ${widget.track.name}');
+         }
+      },
+      leading: SizedBox(
+        width: 32,
+        child: Center(
+          child: Text(
+            '${widget.index + 1}',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: rankColor,
+            ),
+          ),
+        ),
+      ),
+      title: Row(
+        children: [
+           ClipRRect(
+             borderRadius: BorderRadius.circular(4),
+             child: CachedNetworkImage(
+               imageUrl: widget.track.picUrl,
+               width: 40,
+               height: 40,
+               fit: BoxFit.cover,
+               placeholder: (c, u) => Container(color: theme.resources.controlFillColorSecondary),
+             ),
+           ),
+           const SizedBox(width: 12),
+           Expanded(
+             child: Column(
+               mainAxisAlignment: MainAxisAlignment.center,
+               crossAxisAlignment: CrossAxisAlignment.start,
+               children: [
+                 Text(
+                   widget.track.name,
+                   maxLines: 1,
+                   overflow: TextOverflow.ellipsis,
+                   style: const TextStyle(fontWeight: FontWeight.w500),
+                 ),
+                 Text(
+                   '${widget.track.artists} - ${widget.track.album}',
+                   maxLines: 1,
+                   overflow: TextOverflow.ellipsis,
+                   style: theme.typography.caption?.copyWith(
+                     color: theme.resources.textFillColorSecondary,
+                   ),
+                 ),
+               ],
+             ),
+           ),
+        ],
+      ),
+      trailing: Icon(fluent.FluentIcons.play, size: 12, color: theme.resources.textFillColorSecondary),
+    );
+  }
+
+  void _showToast(BuildContext context, String message) {
+    // 尝试寻找 ScaffoldMessenger，如果没有则忽略（或实现自定义 overlay）
+    // Fluent 应用如果嵌套在 MaterialApp 下通常有 ScaffoldMessenger
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(milliseconds: 1000)),
+      );
+    } catch (_) {
+      // 忽略错误
+    }
+  }
 }
 
 /// 构建榜单详情内容（桌面端和移动端共用 - Material Design 3 样式）

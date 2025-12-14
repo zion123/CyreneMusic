@@ -292,10 +292,16 @@ class PlayerPlaylistPanel extends StatelessWidget {
     switch (source.toString()) {
       case 'MusicSource.netease':
         return '🎵';
+      case 'MusicSource.apple':
+        return '🍎';
       case 'MusicSource.qq':
         return '🎶';
       case 'MusicSource.kugou':
         return '🎼';
+      case 'MusicSource.kuwo':
+        return '🎸';
+      case 'MusicSource.local':
+        return '📁';
       default:
         return '🎵';
     }

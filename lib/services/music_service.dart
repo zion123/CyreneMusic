@@ -230,6 +230,27 @@ class MusicService extends ChangeNotifier {
           );
           break;
 
+        case MusicSource.apple:
+          // Apple Music
+          // 后端对齐网易云 song 接口返回结构：{status,id,name,pic,ar_name,al_name,level,size,url,lyric,tlyric}
+          // 注意：后端返回的 url 是加密的 HLS 流，需要使用 /apple/stream 端点获取解密后的音频
+          url = '$baseUrl/apple/song?salableAdamId=$songId&storefront=cn';
+          DeveloperModeService().addLog('🌐 [Network] GET $url');
+
+          response = await http.get(
+            Uri.parse(url),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          ).timeout(
+            const Duration(seconds: 15),
+            onTimeout: () {
+              DeveloperModeService().addLog('⏱️ [Network] 请求超时 (15s)');
+              throw Exception('请求超时');
+            },
+          );
+          break;
+
         case MusicSource.qq:
           // QQ音乐
           url = '$baseUrl/qq/song?ids=$songId';
@@ -357,7 +378,7 @@ class MusicService extends ChangeNotifier {
           }
           print('   music_urls 字段存在: ${data.containsKey('music_urls')}');
         } else {
-          // 网易云/酷狗格式
+          // 网易云/Apple/酷狗/酷我格式
           print('   name: ${data['name']}');
           print('   url: ${data['url']}');
           print('   lyric 字段存在: ${data.containsKey('lyric')}');
@@ -513,9 +534,45 @@ class MusicService extends ChangeNotifier {
               tlyric: '', // 酷我音乐没有翻译歌词
               source: source,
             );
+          } else if (source == MusicSource.apple) {
+            // Apple Music - 需要特殊处理 URL
+            // 后端返回的 url 是加密的 HLS 流，需要替换为解密流端点
+            print('🔧 [MusicService] 开始解析 Apple Music 数据...');
+            
+            final originalUrl = data['url'] as String? ?? '';
+            final isEncrypted = data['isEncrypted'] as bool? ?? 
+                (originalUrl.contains('.m3u8') || originalUrl.contains('aod-ssl.itunes.apple.com'));
+            
+            // 如果是加密流，使用后端的解密流端点
+            String playUrl = originalUrl;
+            if (isEncrypted && originalUrl.isNotEmpty) {
+              // 构建解密流端点 URL
+              playUrl = '$baseUrl/apple/stream?salableAdamId=$songId';
+              print('🔐 [MusicService] Apple Music 流已加密，使用解密端点: $playUrl');
+              DeveloperModeService().addLog('🔐 [MusicService] 使用解密流端点');
+            }
+            
+            songDetail = SongDetail(
+              id: data['id'] ?? songId,
+              name: data['name'] ?? '',
+              pic: data['pic'] ?? '',
+              arName: data['ar_name'] ?? '',
+              alName: data['al_name'] ?? '',
+              level: data['level'] ?? '',
+              size: data['size'] ?? '0',
+              url: playUrl,
+              lyric: data['lyric'] ?? '',
+              tlyric: data['tlyric'] ?? '',
+              source: source,
+            );
+            
+            print('🔧 [MusicService] 解析完成，检查 SongDetail 对象:');
+            print('   songDetail.lyric 长度: ${songDetail.lyric.length}');
+            print('   songDetail.tlyric 长度: ${songDetail.tlyric.length}');
+            print('   songDetail.url: ${songDetail.url}');
           } else {
-            // 网易云音乐（原有格式）
-            print('🔧 [MusicService] 开始解析网易云音乐数据...');
+            // 网易云音乐（同结构）
+            print('🔧 [MusicService] 开始解析 ${source.name} 数据...');
             songDetail = SongDetail.fromJson(data, source: source);
             print('🔧 [MusicService] 解析完成，检查 SongDetail 对象:');
             print('   songDetail.lyric 长度: ${songDetail.lyric.length}');

@@ -26,10 +26,16 @@ class MergedTrack {
     return tracks.map((t) => t.getSourceIcon()).toList();
   }
 
-  /// 按优先级获取最佳 Track（网易云 > QQ音乐 > 酷狗音乐）
+  /// 按优先级获取最佳 Track（网易云 > QQ音乐 > 酷狗音乐 > 酷我 > Apple Music）
   Track getBestTrack() {
-    // 优先级：网易云 > QQ > 酷狗
-    for (final source in [MusicSource.netease, MusicSource.qq, MusicSource.kugou]) {
+    // 优先级：网易云 > QQ > 酷狗 > 酷我 > Apple Music（Apple Music DRM 加密流目前无法直接播放）
+    for (final source in [
+      MusicSource.netease,
+      MusicSource.qq,
+      MusicSource.kugou,
+      MusicSource.kuwo,
+      MusicSource.apple, // Apple Music 优先级最低
+    ]) {
       try {
         return tracks.firstWhere((t) => t.source == source);
       } catch (e) {
@@ -91,6 +97,7 @@ class MergedTrack {
   }
 
   /// 获取平台优先级（数字越小优先级越高）
+  /// Apple Music 优先级最低，因为其 DRM 加密流目前无法直接播放
   static int _getPriority(MusicSource source) {
     switch (source) {
       case MusicSource.netease:
@@ -101,8 +108,10 @@ class MergedTrack {
         return 2;
       case MusicSource.kuwo:
         return 3;
+      case MusicSource.apple:
+        return 4; // Apple Music 优先级最低
       case MusicSource.local:
-        return 4;
+        return 5;
     }
   }
 }

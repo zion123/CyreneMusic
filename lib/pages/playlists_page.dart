@@ -772,11 +772,11 @@ class _PlaylistsPageState extends State<PlaylistsPage>
 
               Navigator.pop(context);
 
-              final success = await _playlistService.createPlaylist(name);
+              final newPlaylist = await _playlistService.createPlaylist(name);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(success ? '创建成功' : '创建失败'),
+                    content: Text(newPlaylist != null ? '创建成功' : '创建失败'),
                   ),
                 );
               }
@@ -1258,8 +1258,8 @@ class _PlaylistsPageState extends State<PlaylistsPage>
       QueueSource.playlist,
     );
 
-    // 播放选中的歌曲
-    PlayerService().playTrack(trackList[index]);
+    // 播放选中的歌曲（来自歌单，检查换源限制）
+    PlayerService().playTrack(trackList[index], fromPlaylist: true);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1286,7 +1286,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
       QueueSource.playlist,
     );
 
-    PlayerService().playTrack(trackList[0]);
+    PlayerService().playTrack(trackList[0], fromPlaylist: true);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1340,10 +1340,16 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     switch (source) {
       case MusicSource.netease:
         return '🎵';
+      case MusicSource.apple:
+        return '🍎';
       case MusicSource.qq:
         return '🎶';
       case MusicSource.kugou:
         return '🎼';
+      case MusicSource.kuwo:
+        return '🎸';
+      case MusicSource.local:
+        return '📁';
     }
   }
 

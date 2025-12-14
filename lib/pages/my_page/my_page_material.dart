@@ -47,6 +47,7 @@ extension MyPageMaterialUI on _MyPageState {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  IconButton(icon: const Icon(Icons.auto_awesome), onPressed: _showMusicTasteDialog, tooltip: '听歌品味总结'),
                   IconButton(icon: const Icon(Icons.cloud_download), onPressed: _showImportPlaylistDialog, tooltip: '从网易云导入歌单'),
                   TextButton.icon(onPressed: _showCreatePlaylistDialog, icon: const Icon(Icons.add), label: const Text('新建')),
                 ],

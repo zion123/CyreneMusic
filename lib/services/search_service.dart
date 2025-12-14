@@ -9,67 +9,79 @@ import 'url_service.dart';
 /// 搜索结果模型
 class SearchResult {
   final List<Track> neteaseResults;
+  final List<Track> appleResults;
   final List<Track> qqResults;
   final List<Track> kugouResults;
   final List<Track> kuwoResults;
   final bool neteaseLoading;
+  final bool appleLoading;
   final bool qqLoading;
   final bool kugouLoading;
   final bool kuwoLoading;
   final String? neteaseError;
+  final String? appleError;
   final String? qqError;
   final String? kugouError;
   final String? kuwoError;
 
   SearchResult({
     this.neteaseResults = const [],
+    this.appleResults = const [],
     this.qqResults = const [],
     this.kugouResults = const [],
     this.kuwoResults = const [],
     this.neteaseLoading = false,
+    this.appleLoading = false,
     this.qqLoading = false,
     this.kugouLoading = false,
     this.kuwoLoading = false,
     this.neteaseError,
+    this.appleError,
     this.qqError,
     this.kugouError,
     this.kuwoError,
   });
 
   /// 获取所有结果的总数
-  int get totalCount => neteaseResults.length + qqResults.length + kugouResults.length + kuwoResults.length;
+  int get totalCount => neteaseResults.length + appleResults.length + qqResults.length + kugouResults.length + kuwoResults.length;
 
   /// 是否所有平台都加载完成
-  bool get allCompleted => !neteaseLoading && !qqLoading && !kugouLoading && !kuwoLoading;
+  bool get allCompleted => !neteaseLoading && !appleLoading && !qqLoading && !kugouLoading && !kuwoLoading;
 
   /// 是否有任何错误
-  bool get hasError => neteaseError != null || qqError != null || kugouError != null || kuwoError != null;
+  bool get hasError => neteaseError != null || appleError != null || qqError != null || kugouError != null || kuwoError != null;
 
   /// 复制并修改部分字段
   SearchResult copyWith({
     List<Track>? neteaseResults,
+    List<Track>? appleResults,
     List<Track>? qqResults,
     List<Track>? kugouResults,
     List<Track>? kuwoResults,
     bool? neteaseLoading,
+    bool? appleLoading,
     bool? qqLoading,
     bool? kugouLoading,
     bool? kuwoLoading,
     String? neteaseError,
+    String? appleError,
     String? qqError,
     String? kugouError,
     String? kuwoError,
   }) {
     return SearchResult(
       neteaseResults: neteaseResults ?? this.neteaseResults,
+      appleResults: appleResults ?? this.appleResults,
       qqResults: qqResults ?? this.qqResults,
       kugouResults: kugouResults ?? this.kugouResults,
       kuwoResults: kuwoResults ?? this.kuwoResults,
       neteaseLoading: neteaseLoading ?? this.neteaseLoading,
+      appleLoading: appleLoading ?? this.appleLoading,
       qqLoading: qqLoading ?? this.qqLoading,
       kugouLoading: kugouLoading ?? this.kugouLoading,
       kuwoLoading: kuwoLoading ?? this.kuwoLoading,
       neteaseError: neteaseError,
+      appleError: appleError,
       qqError: qqError,
       kugouError: kugouError,
       kuwoError: kuwoError,
@@ -112,6 +124,7 @@ class SearchService extends ChangeNotifier {
     // 重置搜索结果，设置加载状态
     _searchResult = SearchResult(
       neteaseLoading: true,
+      appleLoading: true,
       qqLoading: true,
       kugouLoading: true,
       kuwoLoading: true,
@@ -120,9 +133,10 @@ class SearchService extends ChangeNotifier {
 
     print('🔍 [SearchService] 开始搜索: $keyword');
 
-    // 并行搜索四个平台
+    // 并行搜索五个平台
     await Future.wait([
       _searchNetease(keyword),
+      _searchApple(keyword),
       _searchQQ(keyword),
       _searchKugou(keyword),
       _searchKuwo(keyword),
@@ -183,6 +197,61 @@ class SearchService extends ChangeNotifier {
       _searchResult = _searchResult.copyWith(
         neteaseLoading: false,
         neteaseError: e.toString(),
+      );
+    }
+    notifyListeners();
+  }
+
+  /// 搜索 Apple Music
+  Future<void> _searchApple(String keyword) async {
+    try {
+      print('🍎 [SearchService] Apple Music 搜索: $keyword');
+
+      final baseUrl = UrlService().baseUrl;
+      final url =
+          '$baseUrl/apple/search?keywords=${Uri.encodeComponent(keyword)}&limit=20';
+
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('请求超时'),
+      );
+
+      if (response.statusCode == 200) {
+        final data =
+            json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+
+        if (data['status'] == 200) {
+          final results = (data['result'] as List<dynamic>)
+              .map((item) => Track(
+                    id: item['id'],
+                    name: item['name'] as String,
+                    artists: item['artists'] as String,
+                    album: item['album'] as String,
+                    picUrl: item['picUrl'] as String,
+                    source: MusicSource.apple,
+                  ))
+              .toList();
+
+          _searchResult = _searchResult.copyWith(
+            appleResults: results,
+            appleLoading: false,
+          );
+
+          print('✅ [SearchService] Apple Music 搜索完成: ${results.length} 条结果');
+        } else {
+          throw Exception('服务器返回状态 ${data['status']}');
+        }
+      } else {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ [SearchService] Apple Music 搜索失败: $e');
+      _searchResult = _searchResult.copyWith(
+        appleLoading: false,
+        appleError: e.toString(),
       );
     }
     notifyListeners();
@@ -351,11 +420,13 @@ class SearchService extends ChangeNotifier {
   /// 获取合并后的搜索结果（跨平台去重）
   List<MergedTrack> getMergedResults() {
     // 收集所有平台的歌曲
+    // 注意：Apple Music 放在最后，因为其 DRM 加密流目前无法直接播放
     final allTracks = <Track>[
       ...(_searchResult.neteaseResults),
       ...(_searchResult.qqResults),
       ...(_searchResult.kugouResults),
       ...(_searchResult.kuwoResults),
+      ...(_searchResult.appleResults), // Apple Music 优先级最低
     ];
 
     if (allTracks.isEmpty) {

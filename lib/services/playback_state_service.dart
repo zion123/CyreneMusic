@@ -201,6 +201,8 @@ class PlaybackStateService {
     switch (normalizedSource) {
       case 'netease':
         return MusicSource.netease;
+      case 'apple':
+        return MusicSource.apple;
       case 'qq':
         return MusicSource.qq;
       case 'kugou':

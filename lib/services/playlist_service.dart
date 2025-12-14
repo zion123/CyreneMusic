@@ -259,15 +259,16 @@ class PlaylistService extends ChangeNotifier {
   }
 
   /// 创建新歌单
-  Future<bool> createPlaylist(String name) async {
+  /// 返回新创建的 Playlist 对象，失败时返回 null
+  Future<Playlist?> createPlaylist(String name) async {
     if (!AuthService().isLoggedIn) {
       print('⚠️ [PlaylistService] 未登录，无法创建歌单');
-      return false;
+      return null;
     }
 
     if (name.trim().isEmpty) {
       print('⚠️ [PlaylistService] 歌单名称不能为空');
-      return false;
+      return null;
     }
 
     try {
@@ -297,22 +298,22 @@ class PlaylistService extends ChangeNotifier {
           final newPlaylist = Playlist.fromJson(data['playlist'] as Map<String, dynamic>);
           _playlists.add(newPlaylist);
 
-          print('✅ [PlaylistService] 创建歌单成功: $name');
+          print('✅ [PlaylistService] 创建歌单成功: $name (id=${newPlaylist.id})');
           notifyListeners();
-          return true;
+          return newPlaylist;
         } else {
           throw Exception(data['message'] ?? '创建失败');
         }
       } else if (response.statusCode == 401) {
         print('⚠️ [PlaylistService] 未授权，需要重新登录');
         await AuthService().handleUnauthorized();
-        return false;
+        return null;
       } else {
         throw Exception('HTTP ${response.statusCode}');
       }
     } catch (e) {
       print('❌ [PlaylistService] 创建歌单失败: $e');
-      return false;
+      return null;
     }
   }
 
@@ -512,6 +513,85 @@ class PlaylistService extends ChangeNotifier {
     } catch (e) {
       print('❌ [PlaylistService] 添加歌曲失败: $e');
       return false;
+    }
+  }
+
+  /// 批量添加歌曲到歌单（高性能版本，一次网络请求）
+  /// 返回 {successCount, skipCount, failCount}
+  Future<Map<String, int>> addTracksToPlaylist(int playlistId, List<Track> tracks) async {
+    if (!AuthService().isLoggedIn) {
+      print('⚠️ [PlaylistService] 未登录，无法批量添加歌曲');
+      return {'successCount': 0, 'skipCount': 0, 'failCount': tracks.length};
+    }
+
+    if (tracks.isEmpty) {
+      return {'successCount': 0, 'skipCount': 0, 'failCount': 0};
+    }
+
+    try {
+      final baseUrl = UrlService().baseUrl;
+      final token = AuthService().token;
+      if (token == null) {
+        throw Exception('无有效令牌');
+      }
+
+      // 转换为 API 需要的格式
+      final tracksData = tracks.map((track) {
+        final playlistTrack = PlaylistTrack.fromTrack(track);
+        return playlistTrack.toJson();
+      }).toList();
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/playlists/$playlistId/tracks/batch'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode({'tracks': tracksData}),
+      ).timeout(
+        const Duration(seconds: 60), // 批量操作需要更长超时
+        onTimeout: () => throw Exception('请求超时'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+
+        if (data['status'] == 200) {
+          final successCount = data['successCount'] as int? ?? 0;
+          final skipCount = data['skipCount'] as int? ?? 0;
+          final failCount = data['failCount'] as int? ?? 0;
+
+          // 更新歌单的歌曲数量
+          final index = _playlists.indexWhere((p) => p.id == playlistId);
+          if (index != -1) {
+            _playlists[index] = Playlist(
+              id: _playlists[index].id,
+              name: _playlists[index].name,
+              isDefault: _playlists[index].isDefault,
+              trackCount: _playlists[index].trackCount + successCount,
+              createdAt: _playlists[index].createdAt,
+              updatedAt: DateTime.now(),
+              source: _playlists[index].source,
+              sourcePlaylistId: _playlists[index].sourcePlaylistId,
+            );
+          }
+
+          print('✅ [PlaylistService] 批量添加完成: 成功=$successCount, 跳过=$skipCount, 失败=$failCount');
+          notifyListeners();
+          return {'successCount': successCount, 'skipCount': skipCount, 'failCount': failCount};
+        } else {
+          throw Exception(data['message'] ?? '批量添加失败');
+        }
+      } else if (response.statusCode == 401) {
+        print('⚠️ [PlaylistService] 未授权，需要重新登录');
+        AuthService().logout();
+        return {'successCount': 0, 'skipCount': 0, 'failCount': tracks.length};
+      } else {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ [PlaylistService] 批量添加歌曲失败: $e');
+      return {'successCount': 0, 'skipCount': 0, 'failCount': tracks.length};
     }
   }
 

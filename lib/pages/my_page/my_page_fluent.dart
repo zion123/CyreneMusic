@@ -77,6 +77,7 @@ extension MyPageFluentUI on _MyPageState {
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                fluent.IconButton(icon: const Icon(fluent.FluentIcons.auto_enhance_on), onPressed: _showMusicTasteDialog),
                                 fluent.IconButton(icon: const Icon(fluent.FluentIcons.cloud_download), onPressed: _showImportPlaylistDialog),
                                 const SizedBox(width: 8),
                                 fluent.FilledButton(onPressed: _showCreatePlaylistDialog, child: const Text('新建')),
