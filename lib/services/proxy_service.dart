@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import 'package:shelf/shelf.dart' as shelf;
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:http/http.dart' as http;
@@ -78,21 +79,37 @@ class ProxyService {
   /// 处理代理请求
   Future<shelf.Response> _handleRequest(shelf.Request request) async {
     try {
+      final method = request.method.toUpperCase();
+      if (method != 'GET' && method != 'HEAD') {
+        return shelf.Response(405, body: 'Method Not Allowed');
+      }
+
       // 获取原始 URL
-      final targetUrl = request.url.queryParameters['url'];
+      var targetUrl = request.url.queryParameters['url'];
       if (targetUrl == null || targetUrl.isEmpty) {
         return shelf.Response.badRequest(body: 'Missing url parameter');
       }
+      targetUrl = targetUrl.trim(); // 去除可能的空白字符
 
       // 获取平台类型（用于设置不同的 referer）
       final platform = request.url.queryParameters['platform'] ?? 'qq';
 
-      print('🌐 [ProxyService] 代理请求: $targetUrl');
-      DeveloperModeService().addLog('🌐 [ProxyService] 代理请求: ${targetUrl.length > 100 ? '${targetUrl.substring(0, 100)}...' : targetUrl}');
+      final targetUri = Uri.parse(targetUrl);
+
+      final rangeHeader = request.headers['range'];
+      final rangeText = (rangeHeader != null && rangeHeader.isNotEmpty)
+          ? ' range=$rangeHeader'
+          : '';
+
+      print('🌐 [ProxyService] 代理请求: $method $targetUrl$rangeText');
+      DeveloperModeService().addLog(
+        '🌐 [ProxyService] 代理请求: $method ${targetUrl.length > 100 ? '${targetUrl.substring(0, 100)}...' : targetUrl}$rangeText',
+      );
 
       // 设置请求头
       final headers = <String, String>{
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': request.headers['user-agent'] ??
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
       };
 
       // 根据平台设置 referer
@@ -100,44 +117,196 @@ class ProxyService {
         headers['referer'] = 'https://y.qq.com';
       } else if (platform == 'kugou') {
         headers['referer'] = 'https://www.kugou.com';
+      } else if (platform == 'apple') {
+        headers['referer'] = 'https://music.apple.com/';
+        headers['origin'] = 'https://music.apple.com';
+        headers['accept'] = '*/*';
+        headers['accept-language'] = request.headers['accept-language'] ??
+            'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6';
+        headers['connection'] = 'keep-alive';
+        headers['cache-control'] = 'no-cache';
+        headers['pragma'] = 'no-cache';
       }
+
+      // 透传 Range 头（HLS 分片/断点续传常用）
+      if (rangeHeader != null && rangeHeader.isNotEmpty) {
+        headers['range'] = rangeHeader;
+      }
+
+      final isMaybeM3u8 = targetUri.path.toLowerCase().endsWith('.m3u8');
+      print('🔍 [ProxyService] isMaybeM3u8: $isMaybeM3u8, path: ${targetUri.path}');
 
       // 发起请求（使用流式传输）
       final client = http.Client();
-      final streamedRequest = http.Request('GET', Uri.parse(targetUrl));
+      final streamedRequest = http.Request(method, targetUri);
       streamedRequest.headers.addAll(headers);
 
-      final streamedResponse = await client.send(streamedRequest);
+      http.StreamedResponse streamedResponse;
+      try {
+        streamedResponse = await client.send(streamedRequest);
+      } catch (_) {
+        client.close();
+        rethrow;
+      }
 
-      if (streamedResponse.statusCode == 200) {
-        // 设置响应头
-        final responseHeaders = {
-          'Content-Type': streamedResponse.headers['content-type'] ?? 'audio/mpeg',
-          'Accept-Ranges': 'bytes',
-          'Cache-Control': 'no-cache',
-        };
+      final upstreamStatus = streamedResponse.statusCode;
+      final upstreamContentRange = streamedResponse.headers['content-range'];
+      final upstreamContentLength = streamedResponse.headers['content-length'];
 
-        // 如果有 Content-Length，也传递给客户端
-        if (streamedResponse.headers['content-length'] != null) {
-          responseHeaders['Content-Length'] = streamedResponse.headers['content-length']!;
+      DeveloperModeService().addLog(
+        '⬆️ [ProxyService] 上游响应: $upstreamStatus'
+        '${upstreamContentLength != null ? ' len=$upstreamContentLength' : ''}'
+        '${upstreamContentRange != null ? ' cr=$upstreamContentRange' : ''}',
+      );
+
+        final upstreamContentType =
+            (streamedResponse.headers['content-type'] ?? '').toLowerCase();
+        
+        print('🔍 [ProxyService] Content-Type: $upstreamContentType');
+        
+        final isM3u8 = isMaybeM3u8 ||
+            upstreamContentType.contains('mpegurl') ||
+            upstreamContentType.contains('application/vnd.apple.mpegurl') ||
+            upstreamContentType.contains('application/x-mpegurl');
+
+        if (method == 'HEAD') {
+          final responseHeaders = <String, String>{
+            if (streamedResponse.headers['content-type'] != null)
+              'Content-Type': streamedResponse.headers['content-type']!,
+            'Accept-Ranges': streamedResponse.headers['accept-ranges'] ?? 'bytes',
+            'Cache-Control': 'no-cache',
+          };
+          if (streamedResponse.headers['content-length'] != null) {
+            responseHeaders['Content-Length'] =
+                streamedResponse.headers['content-length']!;
+          }
+          if (streamedResponse.headers['content-range'] != null) {
+            responseHeaders['Content-Range'] =
+                streamedResponse.headers['content-range']!;
+          }
+          client.close();
+          return shelf.Response(upstreamStatus, headers: responseHeaders);
         }
 
-        print('✅ [ProxyService] 开始流式传输音频数据');
-        DeveloperModeService().addLog('✅ [ProxyService] 开始流式传输音频数据');
+        if (isM3u8 && (upstreamStatus == 200 || upstreamStatus == 206)) {
+          // m3u8 必须重写分片 URL，确保分片也走代理（否则鉴权会失败）
+          final bodyBytes = await streamedResponse.stream.toBytes();
+          client.close();
+          final playlistText = utf8.decode(bodyBytes);
+          final lines = playlistText.split(RegExp(r'\r?\n'));
 
-        // 流式传输响应数据
-        return shelf.Response.ok(
-          streamedResponse.stream,
-          headers: responseHeaders,
-        );
-      } else {
-        print('❌ [ProxyService] 上游服务器返回: ${streamedResponse.statusCode}');
-        DeveloperModeService().addLog('❌ [ProxyService] 上游服务器返回: ${streamedResponse.statusCode}');
+          final rewritten = lines.map((line) {
+            final trimmed = line.trim();
+            if (trimmed.isEmpty) return line;
+            if (trimmed.startsWith('#')) {
+              final uriAttrRegex = RegExp(r'URI="([^"]+)"');
+              if (!uriAttrRegex.hasMatch(line)) return line;
+
+              return line.replaceAllMapped(uriAttrRegex, (m) {
+                final raw = m.group(1);
+                if (raw == null || raw.isEmpty) return m.group(0) ?? '';
+                if (raw.startsWith('skd://')) return m.group(0) ?? '';
+
+                Uri resolved;
+                try {
+                  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+                    resolved = Uri.parse(raw);
+                  } else if (raw.startsWith('//')) {
+                    resolved = Uri.parse('${targetUri.scheme}:$raw');
+                  } else {
+                    resolved = targetUri.resolve(raw);
+                  }
+                } catch (_) {
+                  return m.group(0) ?? '';
+                }
+
+                final proxied = getProxyUrl(resolved.toString(), platform);
+                return 'URI="$proxied"';
+              });
+            }
+
+            Uri resolved;
+            try {
+              if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+                resolved = Uri.parse(trimmed);
+              } else if (trimmed.startsWith('//')) {
+                resolved = Uri.parse('${targetUri.scheme}:$trimmed');
+              } else {
+                resolved = targetUri.resolve(trimmed);
+              }
+            } catch (_) {
+              return line;
+            }
+
+            return getProxyUrl(resolved.toString(), platform);
+          }).join('\n');
+
+          final responseHeaders = <String, String>{
+            'Content-Type':
+                streamedResponse.headers['content-type'] ?? 'application/vnd.apple.mpegurl',
+            'Cache-Control': 'no-cache',
+          };
+
+          return shelf.Response.ok(
+            rewritten,
+            headers: responseHeaders,
+          );
+        }
+
+        if (upstreamStatus == 200 || upstreamStatus == 206) {
+          // 设置响应头
+          final responseHeaders = <String, String>{
+            'Content-Type': streamedResponse.headers['content-type'] ?? 'audio/mpeg',
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache',
+          };
+
+          if (streamedResponse.headers['content-length'] != null) {
+            responseHeaders['Content-Length'] =
+                streamedResponse.headers['content-length']!;
+          }
+          if (upstreamStatus == 206 && streamedResponse.headers['content-range'] != null) {
+            responseHeaders['Content-Range'] =
+                streamedResponse.headers['content-range']!;
+          }
+
+          print('✅ [ProxyService] 开始流式传输音频数据');
+          DeveloperModeService().addLog('✅ [ProxyService] 开始流式传输音频数据');
+          final controller = StreamController<List<int>>();
+          late final StreamSubscription<List<int>> sub;
+          sub = streamedResponse.stream.listen(
+            controller.add,
+            onError: (e, st) {
+              DeveloperModeService().addLog('❌ [ProxyService] 流式传输错误: $e');
+              controller.addError(e, st);
+              controller.close();
+              client.close();
+            },
+            onDone: () async {
+              await controller.close();
+              client.close();
+            },
+            cancelOnError: false,
+          );
+          controller.onCancel = () async {
+            await sub.cancel();
+            client.close();
+          };
+
+          return shelf.Response(
+            upstreamStatus,
+            body: controller.stream,
+            headers: responseHeaders,
+          );
+        }
+
+        print('❌ [ProxyService] 上游服务器返回: $upstreamStatus');
+        DeveloperModeService().addLog('❌ [ProxyService] 上游服务器返回: $upstreamStatus');
+        client.close();
         return shelf.Response(
-          streamedResponse.statusCode,
-          body: 'Upstream server error: ${streamedResponse.statusCode}',
+          upstreamStatus,
+          body: 'Upstream server error: $upstreamStatus',
         );
-      }
     } catch (e, stackTrace) {
       print('❌ [ProxyService] 处理请求失败: $e');
       print('Stack trace: $stackTrace');

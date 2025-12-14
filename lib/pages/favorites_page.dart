@@ -330,10 +330,16 @@ class _FavoritesPageState extends State<FavoritesPage>
     switch (source) {
       case MusicSource.netease:
         return '🎵';
+      case MusicSource.apple:
+        return '🍎';
       case MusicSource.qq:
         return '🎶';
       case MusicSource.kugou:
         return '🎼';
+      case MusicSource.kuwo:
+        return '🎸';
+      case MusicSource.local:
+        return '📁';
     }
   }
 

@@ -168,6 +168,8 @@ class TrackSourceSwitchService extends ChangeNotifier {
       switch (targetSource) {
         case MusicSource.netease:
           return await _searchNetease(keyword, baseUrl);
+        case MusicSource.apple:
+          return await _searchApple(keyword, baseUrl);
         case MusicSource.qq:
           return await _searchQQ(keyword, baseUrl);
         case MusicSource.kugou:
@@ -181,6 +183,35 @@ class TrackSourceSwitchService extends ChangeNotifier {
       print('❌ [TrackSourceSwitchService] 搜索失败: $e');
       rethrow;
     }
+  }
+
+  /// 搜索 Apple Music
+  Future<List<Track>> _searchApple(String keyword, String baseUrl) async {
+    final url =
+        '$baseUrl/apple/search?keywords=${Uri.encodeComponent(keyword)}&limit=1';
+    final response = await http.get(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 200) {
+      final data =
+          json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      if (data['status'] == 200) {
+        return (data['result'] as List<dynamic>)
+            .take(1)
+            .map((item) => Track(
+                  id: item['id'],
+                  name: item['name'] as String,
+                  artists: item['artists'] as String,
+                  album: item['album'] as String,
+                  picUrl: item['picUrl'] as String,
+                  source: MusicSource.apple,
+                ))
+            .toList();
+      }
+    }
+    throw Exception('Apple Music 搜索失败');
   }
 
   /// 搜索网易云音乐

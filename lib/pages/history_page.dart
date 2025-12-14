@@ -686,6 +686,8 @@ class _HistoryPageState extends State<HistoryPage> with AutomaticKeepAliveClient
     switch (source) {
       case MusicSource.netease:
         return '🎵';
+      case MusicSource.apple:
+        return '🍎';
       case MusicSource.qq:
         return '🎶';
       case MusicSource.kugou:

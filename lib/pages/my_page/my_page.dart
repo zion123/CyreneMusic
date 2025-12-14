@@ -13,6 +13,7 @@ import '../../models/playlist.dart';
 import '../../models/track.dart';
 import '../../widgets/import_playlist_dialog.dart';
 import '../../widgets/source_switch_dialog.dart';
+import '../../widgets/music_taste_dialog.dart';
 import '../auth/auth_page.dart';
 
 // UI 组件分离到 part 文件
@@ -310,6 +311,10 @@ class _MyPageState extends State<MyPage> {
     });
   }
 
+  void _showMusicTasteDialog() {
+    MusicTasteDialog.show(context);
+  }
+
   void _showCreatePlaylistDialog() {
     if (_themeManager.isFluentFramework) {
       _showCreatePlaylistDialogFluent();
@@ -342,10 +347,10 @@ class _MyPageState extends State<MyPage> {
                 final name = controller.text.trim();
                 if (name.isEmpty) return;
                 Navigator.pop(context);
-                await _playlistService.createPlaylist(name);
+                final newPlaylist = await _playlistService.createPlaylist(name);
                 _showUserNotification(
-                  '歌单「$name」创建成功',
-                  severity: fluent.InfoBarSeverity.success,
+                  newPlaylist != null ? '歌单「$name」创建成功' : '创建歌单失败',
+                  severity: newPlaylist != null ? fluent.InfoBarSeverity.success : fluent.InfoBarSeverity.error,
                 );
               },
               child: const Text('创建'),
@@ -386,10 +391,10 @@ class _MyPageState extends State<MyPage> {
                   return;
                 }
                 Navigator.pop(context);
-                await _playlistService.createPlaylist(playlistName.trim());
+                final newPlaylist = await _playlistService.createPlaylist(playlistName.trim());
                 _showUserNotification(
-                  '歌单「$playlistName」创建成功',
-                  severity: fluent.InfoBarSeverity.success,
+                  newPlaylist != null ? '歌单「$playlistName」创建成功' : '创建歌单失败',
+                  severity: newPlaylist != null ? fluent.InfoBarSeverity.success : fluent.InfoBarSeverity.error,
                 );
               },
               child: const Text('创建'),
@@ -425,8 +430,8 @@ class _MyPageState extends State<MyPage> {
               final name = controller.text.trim();
               if (name.isEmpty) return;
               Navigator.pop(context);
-              await _playlistService.createPlaylist(name);
-              _showCupertinoToast('歌单「$name」创建成功');
+              final newPlaylist = await _playlistService.createPlaylist(name);
+              _showCupertinoToast(newPlaylist != null ? '歌单「$name」创建成功' : '创建歌单失败');
             },
             child: const Text('创建'),
           ),
@@ -562,15 +567,6 @@ class _MyPageState extends State<MyPage> {
   }
 
   Future<void> _confirmDeletePlaylist(Playlist playlist) async {
-    if (playlist.isDefault) {
-      _showUserNotification(
-        '默认歌单不能删除',
-        severity: fluent.InfoBarSeverity.warning,
-        materialBackground: Colors.orange,
-      );
-      return;
-    }
-
     bool? confirmed;
     if (_themeManager.isFluentFramework) {
       confirmed = await fluent.showDialog<bool>(
@@ -802,11 +798,6 @@ class _MyPageState extends State<MyPage> {
   }
 
   Future<void> _confirmDeletePlaylistCupertino(Playlist playlist) async {
-    if (playlist.isDefault) {
-      _showCupertinoToast('默认歌单不能删除');
-      return;
-    }
-
     final confirmed = await showCupertinoDialog<bool>(
       context: context,
       builder: (context) => CupertinoAlertDialog(

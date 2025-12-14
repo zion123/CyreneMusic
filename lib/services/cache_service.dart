@@ -84,15 +84,19 @@ class CacheStats {
   final int totalFiles;
   final int totalSize;
   final int neteaseCount;
+  final int appleCount;
   final int qqCount;
   final int kugouCount;
+  final int kuwoCount;
 
   CacheStats({
     required this.totalFiles,
     required this.totalSize,
     required this.neteaseCount,
+    required this.appleCount,
     required this.qqCount,
     required this.kugouCount,
+    required this.kuwoCount,
   });
 
   String get formattedSize {
@@ -344,6 +348,13 @@ class CacheService extends ChangeNotifier {
         track.source,
       );
 
+      // Apple Music 常用 HLS(m3u8)；当前缓存逻辑是整文件下载，不适用于 HLS。
+      if (track.source == MusicSource.apple ||
+          songDetail.url.toLowerCase().contains('.m3u8')) {
+        print('ℹ️ [CacheService] 跳过缓存: ${track.name} (${track.getSourceName()})');
+        return false;
+      }
+
       // 检查是否已缓存
       if (_cacheIndex.containsKey(cacheKey)) {
         print('ℹ️ [CacheService] 歌曲已缓存: ${track.name}');
@@ -490,8 +501,10 @@ class CacheService extends ChangeNotifier {
   Future<CacheStats> getCacheStats() async {
     int totalSize = 0;
     int neteaseCount = 0;
+    int appleCount = 0;
     int qqCount = 0;
     int kugouCount = 0;
+    int kuwoCount = 0;
 
     for (final metadata in _cacheIndex.values) {
       totalSize += metadata.fileSize;
@@ -500,11 +513,17 @@ class CacheService extends ChangeNotifier {
         case 'netease':
           neteaseCount++;
           break;
+        case 'apple':
+          appleCount++;
+          break;
         case 'qq':
           qqCount++;
           break;
         case 'kugou':
           kugouCount++;
+          break;
+        case 'kuwo':
+          kuwoCount++;
           break;
       }
     }
@@ -513,8 +532,10 @@ class CacheService extends ChangeNotifier {
       totalFiles: _cacheIndex.length,
       totalSize: totalSize,
       neteaseCount: neteaseCount,
+      appleCount: appleCount,
       qqCount: qqCount,
       kugouCount: kugouCount,
+      kuwoCount: kuwoCount,
     );
   }
 

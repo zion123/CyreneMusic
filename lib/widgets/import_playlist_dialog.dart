@@ -17,7 +17,8 @@ enum MusicPlatform {
   netease('网易云音乐', '🎵'),
   qq('QQ音乐', '🎶'),
   kugou('酷狗音乐', '🎸'),
-  kuwo('酷我音乐', '🎤');
+  kuwo('酷我音乐', '🎤'),
+  apple('Apple Music', '🍎');
 
   final String name;
   final String icon;
@@ -160,6 +161,66 @@ class ImportPlaylistDialog {
     }
   }
 
+  /// 解析Apple Music歌单URL，提取歌单ID
+  /// 支持格式：
+  /// - 歌单ID：pl.u-55D6ZJ3iDyp2AD
+  /// - 分享链接：https://music.apple.com/cn/playlist/%E5%95%8A%E8%BF%99/pl.u-55D6ZJ3iDyp2AD
+  static String? _parseApplePlaylistId(String input) {
+    final trimmedInput = input.trim();
+    
+    // 如果输入的是歌单ID格式 (pl.u-xxx 或 pl.xxx)，直接返回
+    if (RegExp(r'^pl\.[a-zA-Z0-9\-]+$').hasMatch(trimmedInput)) {
+      return trimmedInput;
+    }
+    
+    // 尝试从URL中解析ID
+    try {
+      final uri = Uri.parse(trimmedInput);
+      
+      // 检查是否是Apple Music域名
+      if (!uri.host.contains('music.apple.com')) {
+        return null;
+      }
+      
+      String? playlistId;
+      
+      // 从路径中提取 (形如 /cn/playlist/xxx/pl.u-55D6ZJ3iDyp2AD)
+      final pathSegments = uri.pathSegments;
+      for (final segment in pathSegments) {
+        if (segment.startsWith('pl.')) {
+          playlistId = segment;
+          break;
+        }
+      }
+      
+      // 正则表达式兜底
+      if (playlistId == null) {
+        final idMatch = RegExp(r'(pl\.[a-zA-Z0-9\-]+)').firstMatch(trimmedInput);
+        if (idMatch != null) {
+          playlistId = idMatch.group(1);
+        }
+      }
+      
+      // 验证ID格式
+      if (playlistId != null && RegExp(r'^pl\.[a-zA-Z0-9\-]+$').hasMatch(playlistId)) {
+        return playlistId;
+      }
+      
+      return null;
+    } catch (e) {
+      // URL解析失败，尝试正则表达式兜底
+      try {
+        final idMatch = RegExp(r'(pl\.[a-zA-Z0-9\-]+)').firstMatch(trimmedInput);
+        if (idMatch != null) {
+          return idMatch.group(1);
+        }
+      } catch (_) {
+        // 忽略正则表达式错误
+      }
+      return null;
+    }
+  }
+
   /// 解析QQ音乐歌单URL，提取歌单ID (dissid)
   static String? _parseQQPlaylistId(String input) {
     final trimmedInput = input.trim();
@@ -238,6 +299,8 @@ class ImportPlaylistDialog {
         return '支持以下两种输入方式：\n• 直接输入歌单ID，如：3567349593\n• 粘贴分享链接，如：https://m.kuwo.cn/newh5app/playlist_detail/3567349593';
       case MusicPlatform.kugou:
         return '';
+      case MusicPlatform.apple:
+        return '支持以下两种输入方式：\n• 直接输入歌单ID，如：pl.u-55D6ZJ3iDyp2AD\n• 粘贴分享链接，如：https://music.apple.com/cn/playlist/xxx/pl.u-55D6ZJ3iDyp2AD';
     }
   }
 
@@ -388,6 +451,8 @@ class ImportPlaylistDialog {
                     playlistId = _parseQQPlaylistId(input);
                   } else if (selectedPlatform == MusicPlatform.kuwo) {
                     playlistId = _parseKuwoPlaylistId(input);
+                  } else if (selectedPlatform == MusicPlatform.apple) {
+                    playlistId = _parseApplePlaylistId(input);
                   }
                   if (playlistId == null) {
                     setState(() => errorText = '无效的${selectedPlatform.name}歌单ID或URL格式');
@@ -590,6 +655,8 @@ class ImportPlaylistDialog {
                     playlistId = _parseQQPlaylistId(input);
                   } else if (selectedPlatform == MusicPlatform.kuwo) {
                     playlistId = _parseKuwoPlaylistId(input);
+                  } else if (selectedPlatform == MusicPlatform.apple) {
+                    playlistId = _parseApplePlaylistId(input);
                   }
                   if (playlistId == null) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -1974,6 +2041,8 @@ class ImportPlaylistDialog {
         url = '$baseUrl/qq/playlist?id=$playlistId&limit=1000';
       } else if (platform == MusicPlatform.kuwo) {
         url = '$baseUrl/kuwo/playlist?pid=$playlistId&limit=500';
+      } else if (platform == MusicPlatform.apple) {
+        url = '$baseUrl/apple/playlist?id=$playlistId';
       } else {
         throw Exception('不支持的平台');
       }
@@ -1995,6 +2064,14 @@ class ImportPlaylistDialog {
         if (platform == MusicPlatform.kuwo) {
           if (data['status'] == 200 && data['data'] != null) {
             final playlist = UniversalPlaylist.fromKuwoJson(data['data']);
+            await _showSelectTargetPlaylistDialog(context, playlist);
+          } else {
+            throw Exception(data['msg'] ?? '获取歌单失败');
+          }
+        } else if (platform == MusicPlatform.apple) {
+          // Apple Music 返回格式
+          if (data['status'] == 200 && data['data'] != null) {
+            final playlist = UniversalPlaylist.fromAppleJson(data['data']['playlist']);
             await _showSelectTargetPlaylistDialog(context, playlist);
           } else {
             throw Exception(data['msg'] ?? '获取歌单失败');
@@ -2254,11 +2331,11 @@ class ImportPlaylistDialog {
                                   );
                                   
                                   if (name != null) {
-                                    final success = await playlistService.createPlaylist(name);
-                                    if (success && context.mounted) {
+                                    final newPlaylist = await playlistService.createPlaylist(name);
+                                    if (newPlaylist != null && context.mounted) {
                                       setState(() {}); // 刷新列表
                                       // 可选：直接选中并返回
-                                      // Navigator.pop(context, playlistService.playlists.firstWhere((p) => p.name == name));
+                                      // Navigator.pop(context, newPlaylist);
                                     }
                                   }
                                 },
@@ -2503,16 +2580,9 @@ class ImportPlaylistDialog {
                     },
                   );
                   if (name != null) {
-                    final success = await playlistService.createPlaylist(name);
-                    if (success && context.mounted) {
-                      await Future.delayed(const Duration(milliseconds: 400));
-                      Navigator.pop(
-                        context,
-                        playlistService.playlists.firstWhere(
-                          (p) => p.name == name,
-                          orElse: () => playlistService.playlists.last,
-                        ),
-                      );
+                    final newPlaylist = await playlistService.createPlaylist(name);
+                    if (newPlaylist != null && context.mounted) {
+                      Navigator.pop(context, newPlaylist);
                     }
                   }
                 },
@@ -2594,30 +2664,15 @@ class ImportPlaylistDialog {
     }
 
     try {
-      int successCount = 0;
-      int failCount = 0;
-
-      for (final track in sourcePlaylist.tracks) {
-        try {
-          await playlistService.addTrackToPlaylist(
-            targetPlaylist.id,
-            track,
-          );
-          successCount++;
-        } catch (e) {
-          // 如果是重复添加，也算成功
-          if (e.toString().contains('已在歌单中')) {
-            successCount++;
-          } else {
-            failCount++;
-          }
-        }
-
-        // 更新进度
-        if (context.mounted) {
-          // 这里可以通过状态管理更新进度，简化起见直接继续
-        }
-      }
+      // 使用批量导入 API（一次网络请求，大幅提升速度）
+      final result = await playlistService.addTracksToPlaylist(
+        targetPlaylist.id,
+        sourcePlaylist.tracks,
+      );
+      
+      final successCount = result['successCount'] ?? 0;
+      final skipCount = result['skipCount'] ?? 0;
+      final failCount = result['failCount'] ?? 0;
 
       if (!context.mounted) return;
       Navigator.pop(context); // 关闭进度对话框
@@ -2656,7 +2711,8 @@ class ImportPlaylistDialog {
                 Text('目标歌单: ${targetPlaylist.name}'),
                 const SizedBox(height: 6),
                 Text('成功导入: $successCount 首'),
-                if (failCount > 0) Text('导入失败: $failCount 首'),
+                if (skipCount > 0) Text('已存在跳过: $skipCount 首', style: TextStyle(color: Colors.orange[700])),
+                if (failCount > 0) Text('导入失败: $failCount 首', style: const TextStyle(color: Colors.red)),
               ],
             ),
             actions: [
@@ -2695,7 +2751,8 @@ class ImportPlaylistDialog {
                 Text('目标歌单: ${targetPlaylist.name}'),
                 const SizedBox(height: 8),
                 Text('成功导入: $successCount 首'),
-                if (failCount > 0) Text('导入失败: $failCount 首'),
+                if (skipCount > 0) Text('已存在跳过: $skipCount 首', style: TextStyle(color: Colors.orange[700])),
+                if (failCount > 0) Text('导入失败: $failCount 首', style: const TextStyle(color: Colors.red)),
               ],
             ),
             actions: [
@@ -2845,6 +2902,45 @@ class UniversalPlaylist {
       description: json['desc'] as String?,
       tracks: tracks,
       platform: MusicPlatform.kuwo,
+    );
+  }
+
+  /// 从 Apple Music API 返回的 JSON 创建 UniversalPlaylist
+  /// Apple Music 返回格式：
+  /// {
+  ///   "id": "pl.u-55D6ZJ3iDyp2AD",
+  ///   "name": "歌单名称",
+  ///   "coverImgUrl": "https://...",
+  ///   "trackCount": 100,
+  ///   "tracks": [
+  ///     {"id": "1542953977", "name": "歌曲名", "artists": "艺术家", "album": "专辑", "picUrl": "..."}
+  ///   ]
+  /// }
+  /// 注意：由于 Apple Music 有 DRM 保护，导入后需要通过其他平台搜索播放
+  factory UniversalPlaylist.fromAppleJson(Map<String, dynamic> json) {
+    final List<dynamic> tracksJson = json['tracks'] ?? [];
+    
+    // Apple Music 歌曲标记为 apple 来源，以便换源功能正确识别
+    final tracks = tracksJson.map((item) {
+      return Track(
+        id: item['id'] ?? '',
+        name: (item['name'] ?? '未知歌曲') as String,
+        artists: (item['artists'] ?? '未知艺术家') as String,
+        album: (item['album'] ?? '未知专辑') as String,
+        picUrl: (item['picUrl'] ?? '') as String,
+        source: MusicSource.apple,  // 标记为 Apple Music 来源
+      );
+    }).toList();
+
+    return UniversalPlaylist(
+      id: json['id'] ?? '',
+      name: (json['name'] ?? '未命名歌单') as String,
+      coverImgUrl: (json['coverImgUrl'] ?? '') as String,
+      creator: 'Apple Music',
+      trackCount: json['trackCount'] as int? ?? tracks.length,
+      description: json['description'] as String?,
+      tracks: tracks,
+      platform: MusicPlatform.apple,
     );
   }
 }
@@ -3101,15 +3197,8 @@ class _SelectTargetPlaylistDialogState
     );
 
     if (name != null) {
-      final success = await _playlistService.createPlaylist(name);
-      if (success) {
-        // 等待列表更新
-        await Future.delayed(const Duration(milliseconds: 500));
-        // 返回新创建的歌单
-        final newPlaylist = _playlistService.playlists.firstWhere(
-          (p) => p.name == name,
-          orElse: () => _playlistService.playlists.last,
-        );
+      final newPlaylist = await _playlistService.createPlaylist(name);
+      if (newPlaylist != null) {
         return newPlaylist;
       }
     }
@@ -3185,6 +3274,8 @@ String _getInputHintTextImpl(MusicPlatform platform) {
       return '支持以下两种输入方式：\n• 直接输入歌单ID，如：3567349593\n• 粘贴分享链接，如：https://m.kuwo.cn/newh5app/playlist_detail/3567349593';
     case MusicPlatform.kugou:
       return '';
+    case MusicPlatform.apple:
+      return '支持以下两种输入方式：\n• 直接输入歌单ID，如：pl.u-55D6ZJ3iDyp2AD\n• 粘贴分享链接，如：https://music.apple.com/cn/playlist/xxx/pl.u-55D6ZJ3iDyp2AD';
   }
 }
 
@@ -3276,6 +3367,8 @@ Future<Map<String, dynamic>?> _showCupertinoImportDialogImpl(
                                 playlistId = ImportPlaylistDialog._parseQQPlaylistId(input);
                               } else if (selectedPlatform == MusicPlatform.kuwo) {
                                 playlistId = ImportPlaylistDialog._parseKuwoPlaylistId(input);
+                              } else if (selectedPlatform == MusicPlatform.apple) {
+                                playlistId = ImportPlaylistDialog._parseApplePlaylistId(input);
                               }
                               if (playlistId == null) {
                                 _showCupertinoToastImpl(context, '无效的${selectedPlatform.name}歌单ID或URL格式');

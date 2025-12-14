@@ -47,7 +47,7 @@ class _SourceSwitchSelectDialogState extends State<SourceSwitchSelectDialog> {
 
   List<MusicSource> _getAvailableSources() {
     return MusicSource.values
-        .where((s) => s != MusicSource.local && s != widget.currentSource)
+        .where((s) => s != MusicSource.local && s != MusicSource.apple && s != widget.currentSource)
         .toList();
   }
 
@@ -500,6 +500,8 @@ class _SourceSwitchSelectDialogState extends State<SourceSwitchSelectDialog> {
     switch (source) {
       case MusicSource.netease:
         return '网易云';
+      case MusicSource.apple:
+        return 'Apple';
       case MusicSource.qq:
         return 'QQ音乐';
       case MusicSource.kugou:
@@ -1280,6 +1282,8 @@ class _SourceSwitchResultDialogState extends State<SourceSwitchResultDialog> {
     switch (source) {
       case MusicSource.netease:
         return '网易云';
+      case MusicSource.apple:
+        return 'Apple';
       case MusicSource.qq:
         return 'QQ音乐';
       case MusicSource.kugou:

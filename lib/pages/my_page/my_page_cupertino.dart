@@ -52,6 +52,7 @@ extension MyPageCupertinoUI on _MyPageState {
                     _buildCupertinoStatsCard(isDark),
                     const SizedBox(height: 24),
                     _buildCupertinoSectionHeader('我的歌单', isDark, actions: [
+                      CupertinoButton(padding: EdgeInsets.zero, onPressed: _showMusicTasteDialog, child: const Icon(CupertinoIcons.sparkles, size: 22)),
                       CupertinoButton(padding: EdgeInsets.zero, onPressed: _showImportPlaylistDialog, child: const Icon(CupertinoIcons.cloud_download, size: 22)),
                       const SizedBox(width: 8),
                       CupertinoButton(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: CupertinoColors.systemBlue, borderRadius: BorderRadius.circular(16), onPressed: _showCreatePlaylistDialog, child: const Text('新建', style: TextStyle(fontSize: 14, color: CupertinoColors.white))),

@@ -285,7 +285,7 @@ class _SearchWidgetState extends State<SearchWidget> {
       _searchService.search(keyword);
       
       final isMergeEnabled = DeveloperModeService().isSearchResultMergeEnabled;
-      final isArtistTab = isMergeEnabled ? _currentTabIndex == 1 : _currentTabIndex == 4;
+      final isArtistTab = isMergeEnabled ? _currentTabIndex == 1 : _currentTabIndex == 5;
       
       if (isArtistTab) {
         _searchArtists(keyword);
@@ -302,7 +302,7 @@ class _SearchWidgetState extends State<SearchWidget> {
 
   void _handleTabChanged(int index) {
     final isMergeEnabled = DeveloperModeService().isSearchResultMergeEnabled;
-    final isArtistTab = isMergeEnabled ? index == 1 : index == 4;
+    final isArtistTab = isMergeEnabled ? index == 1 : index == 5;
     
     if (_currentTabIndex == index) {
       if (isArtistTab) {
@@ -606,7 +606,7 @@ class _SearchWidgetState extends State<SearchWidget> {
     final isMergeEnabled = DeveloperModeService().isSearchResultMergeEnabled;
     final tabs = isMergeEnabled 
         ? ['歌曲', '歌手'] 
-        : ['网易云', 'QQ音乐', '酷狗', '酷我', '歌手'];
+        : ['网易云', 'Apple', 'QQ音乐', '酷狗', '酷我', '歌手'];
 
     return Column(
       children: [
@@ -681,6 +681,15 @@ class _SearchWidgetState extends State<SearchWidget> {
           );
         case 1:
           return Container(
+            key: const ValueKey('cupertino_apple_tab'),
+            child: _buildCupertinoSinglePlatformList(
+              searchResult.appleResults,
+              searchResult.appleLoading,
+              isDark,
+            ),
+          );
+        case 2:
+          return Container(
             key: const ValueKey('cupertino_qq_tab'),
             child: _buildCupertinoSinglePlatformList(
               searchResult.qqResults,
@@ -688,7 +697,7 @@ class _SearchWidgetState extends State<SearchWidget> {
               isDark,
             ),
           );
-        case 2:
+        case 3:
           return Container(
             key: const ValueKey('cupertino_kugou_tab'),
             child: _buildCupertinoSinglePlatformList(
@@ -697,7 +706,7 @@ class _SearchWidgetState extends State<SearchWidget> {
               isDark,
             ),
           );
-        case 3:
+        case 4:
           return Container(
             key: const ValueKey('cupertino_kuwo_tab'),
             child: _buildCupertinoSinglePlatformList(
@@ -706,7 +715,7 @@ class _SearchWidgetState extends State<SearchWidget> {
               isDark,
             ),
           );
-        case 4:
+        case 5:
         default:
           return Container(
             key: const ValueKey('cupertino_artists_tab'),
@@ -773,6 +782,7 @@ class _SearchWidgetState extends State<SearchWidget> {
     }
 
     final isLoading = result.neteaseLoading || 
+        result.appleLoading ||
         result.qqLoading || 
         result.kugouLoading || 
         result.kuwoLoading;
@@ -1659,7 +1669,7 @@ class _SearchWidgetState extends State<SearchWidget> {
     final isMergeEnabled = DeveloperModeService().isSearchResultMergeEnabled;
     final tabs = isMergeEnabled 
         ? ['歌曲', '歌手'] 
-        : ['网易云', 'QQ音乐', '酷狗', '酷我', '歌手'];
+        : ['网易云', 'Apple', 'QQ音乐', '酷狗', '酷我', '歌手'];
 
     return Column(
       children: [
@@ -1713,7 +1723,7 @@ class _SearchWidgetState extends State<SearchWidget> {
         child: _buildArtistResults(),
       );
     } else {
-      // 分平台模式：['网易云', 'QQ音乐', '酷狗', '酷我', '歌手']
+      // 分平台模式：['网易云', 'Apple', 'QQ音乐', '酷狗', '酷我', '歌手']
       switch (_currentTabIndex) {
         case 0:
           return Container(
@@ -1726,6 +1736,15 @@ class _SearchWidgetState extends State<SearchWidget> {
           );
         case 1:
           return Container(
+            key: const ValueKey('apple_tab'),
+            color: backgroundColor,
+            child: _buildSinglePlatformList(
+              searchResult.appleResults,
+              searchResult.appleLoading,
+            ),
+          );
+        case 2:
+          return Container(
             key: const ValueKey('qq_tab'),
             color: backgroundColor,
             child: _buildSinglePlatformList(
@@ -1733,7 +1752,7 @@ class _SearchWidgetState extends State<SearchWidget> {
               searchResult.qqLoading,
             ),
           );
-        case 2:
+        case 3:
           return Container(
             key: const ValueKey('kugou_tab'),
             color: backgroundColor,
@@ -1742,7 +1761,7 @@ class _SearchWidgetState extends State<SearchWidget> {
               searchResult.kugouLoading,
             ),
           );
-        case 3:
+        case 4:
           return Container(
             key: const ValueKey('kuwo_tab'),
             color: backgroundColor,
@@ -1751,7 +1770,7 @@ class _SearchWidgetState extends State<SearchWidget> {
               searchResult.kuwoLoading,
             ),
           );
-        case 4:
+        case 5:
         default:
           return Container(
             key: const ValueKey('artists_tab'),
@@ -1960,7 +1979,11 @@ class _SearchWidgetState extends State<SearchWidget> {
 
     // 显示加载状态
     final isLoading =
-        result.neteaseLoading || result.qqLoading || result.kugouLoading || result.kuwoLoading;
+        result.neteaseLoading ||
+        result.appleLoading ||
+        result.qqLoading ||
+        result.kugouLoading ||
+        result.kuwoLoading;
 
     // 获取合并后的结果
     final mergedResults = _searchService.getMergedResults();
