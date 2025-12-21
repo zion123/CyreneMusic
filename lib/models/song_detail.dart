@@ -12,6 +12,7 @@ class SongDetail {
   final String url; // 播放链接
   final String lyric; // 歌词
   final String tlyric; // 翻译歌词
+  final String yrc; // 逐字歌词（网易云YRC格式）
   final MusicSource source;
 
   SongDetail({
@@ -25,6 +26,7 @@ class SongDetail {
     required this.url,
     required this.lyric,
     required this.tlyric,
+    this.yrc = '',
     this.source = MusicSource.netease,
   });
 
@@ -33,26 +35,32 @@ class SongDetail {
     // 🔧 安全获取歌词字段（兼容网易云和QQ音乐格式）
     String lyricText = '';
     String tlyricText = '';
-    
+    String yrcText = '';
+
     // 网易云音乐格式：lyric 和 tlyric 直接是字符串
     // QQ音乐格式：可能是 Map（不应该直接传入，但做防御性处理）
     final lyricValue = json['lyric'];
     final tlyricValue = json['tlyric'];
-    
+    final yrcValue = json['yrc'];
+
     if (lyricValue is String) {
       lyricText = lyricValue;
     } else if (lyricValue is Map) {
       // QQ音乐格式：{lyric: string, tylyric: string}
       lyricText = (lyricValue['lyric'] is String) ? lyricValue['lyric'] : '';
     }
-    
+
     if (tlyricValue is String) {
       tlyricText = tlyricValue;
     } else if (tlyricValue is Map) {
       // QQ音乐格式
       tlyricText = (tlyricValue['tylyric'] is String) ? tlyricValue['tylyric'] : '';
     }
-    
+
+    if (yrcValue is String) {
+      yrcText = yrcValue;
+    }
+
     return SongDetail(
       id: json['id'] ?? 0, // 支持 int 和 String
       name: json['name'] as String? ?? '',
@@ -64,6 +72,7 @@ class SongDetail {
       url: json['url'] as String? ?? '',
       lyric: lyricText,
       tlyric: tlyricText,
+      yrc: yrcText,
       source: source ?? MusicSource.netease,
     );
   }

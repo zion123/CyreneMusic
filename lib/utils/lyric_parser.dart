@@ -2,8 +2,91 @@ import '../models/lyric_line.dart';
 
 /// 歌词解析器
 class LyricParser {
+  /// 解析网易云音乐 YRC 格式逐字歌词
+  /// YRC格式示例: [22310,4300](22310,2880,0)都 (25190,310,0)是(25500,290,0)勇
+  static List<LyricLine> parseNeteaseYrcLyric(String yrcLyric, {String? translation}) {
+    if (yrcLyric.isEmpty) return [];
+
+    final lines = <LyricLine>[];
+    final yrcLines = yrcLyric.split('\n');
+
+    // 解析翻译歌词（如果有）
+    final Map<Duration, String> translationMap = {};
+    if (translation != null && translation.isNotEmpty) {
+      final translationLines = translation.split('\n');
+      for (final line in translationLines) {
+        final time = LyricLine.parseTime(line);
+        if (time != null) {
+          final text = line
+              .replaceAll(RegExp(r'\[\d+:\d+\.\d+\]'), '')
+              .replaceAll(RegExp(r'\[\d+:\d+:\d+\]'), '')
+              .replaceAll(RegExp(r'\[\d+:\d+\]'), '')
+              .trim();
+          if (text.isNotEmpty) {
+            translationMap[time] = text;
+          }
+        }
+      }
+    }
+
+    // 解析YRC格式歌词
+    for (final line in yrcLines) {
+      if (line.trim().isEmpty) continue;
+
+      try {
+        // YRC格式: [startTime,duration](word1Time,word1Duration,0)word1 (word2Time,word2Duration,0)word2
+        final lineTimeMatch = RegExp(r'^\[(\d+),(\d+)\]').firstMatch(line);
+        if (lineTimeMatch == null) continue;
+
+        final lineStartMs = int.parse(lineTimeMatch.group(1)!);
+        final lineStartTime = Duration(milliseconds: lineStartMs);
+
+        // 提取歌词文本（忽略逐字时间戳）
+        final textBuffer = StringBuffer();
+
+        // 匹配所有 (time,duration,0)word 格式
+        final wordPattern = RegExp(r'\((\d+),(\d+),\d+\)([^\(]+)');
+        final wordMatches = wordPattern.allMatches(line);
+
+        for (final match in wordMatches) {
+          final wordText = match.group(3)!.trim();
+          if (wordText.isNotEmpty) {
+            textBuffer.write(wordText);
+          }
+        }
+
+        final fullText = textBuffer.toString().trim();
+        if (fullText.isNotEmpty) {
+          lines.add(LyricLine(
+            startTime: lineStartTime,
+            text: fullText,
+            translation: translationMap[lineStartTime],
+          ));
+        }
+      } catch (e) {
+        // 解析失败，跳过该行
+        print('YRC解析失败: $line, 错误: $e');
+        continue;
+      }
+    }
+
+    // 按时间排序
+    lines.sort((a, b) => a.startTime.compareTo(b.startTime));
+
+    return lines;
+  }
+
   /// 解析网易云音乐 LRC 格式歌词
-  static List<LyricLine> parseNeteaseLyric(String lyric, {String? translation}) {
+  static List<LyricLine> parseNeteaseLyric(String lyric, {String? translation, String? yrcLyric}) {
+    // 如果有YRC逐字歌词，优先使用
+    if (yrcLyric != null && yrcLyric.isNotEmpty) {
+      final yrcLines = parseNeteaseYrcLyric(yrcLyric, translation: translation);
+      if (yrcLines.isNotEmpty) {
+        return yrcLines;
+      }
+    }
+
+    // 否则使用普通LRC格式
     if (lyric.isEmpty) return [];
 
     final lines = <LyricLine>[];

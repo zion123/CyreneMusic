@@ -613,9 +613,11 @@ class _KaraokeTextState extends State<_KaraokeText> with SingleTickerProviderSta
 
   void _onTick(Duration elapsed) {
     final currentPos = PlayerService().position;
+
+    // 使用平均计算方式
     final elapsedFromStart = currentPos - widget.lyric.startTime;
     final newProgress = (elapsedFromStart.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0);
-    
+
     // 仅在进度有显著变化时更新（减少不必要的重建）
     if ((newProgress - _progress).abs() > 0.005) {
       setState(() {

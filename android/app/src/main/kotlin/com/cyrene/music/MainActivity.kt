@@ -3,22 +3,22 @@ package com.cyrene.music
 import android.os.Bundle
 import android.util.Log
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import com.ryanheise.audioservice.AudioServiceActivity
+import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
-class MainActivity : AudioServiceActivity() {
-    
+class MainActivity : FlutterActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 必须在 super.onCreate() 之前调用 installSplashScreen()
         installSplashScreen()
         super.onCreate(savedInstanceState)
     }
-    
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
+
         Log.d("MainActivity", "🔧 开始配置 Flutter Engine")
-        
+
         try {
             // 注册悬浮歌词插件
             val floatingPlugin = FloatingLyricPlugin()
