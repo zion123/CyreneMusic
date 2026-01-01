@@ -383,6 +383,25 @@ class LxMusicRuntimeService {
         return null;
       },
     );
+
+    // 处理歌词请求（占位处理器，防止脚本调用不存在的处理器导致阻塞）
+    // 注意：我们不使用洛雪脚本的歌词功能，而是通过后端 API 获取歌词
+    controller.addJavaScriptHandler(
+      handlerName: 'LxLyricInfo',
+      callback: (args) {
+        print('ℹ️ [LxMusicRuntime] 歌词请求已忽略（使用后端 API 获取歌词）');
+        return null;
+      },
+    );
+
+    // 其他可能的歌词相关处理器
+    controller.addJavaScriptHandler(
+      handlerName: 'lxOnLyric',
+      callback: (args) {
+        print('ℹ️ [LxMusicRuntime] lxOnLyric 请求已忽略');
+        return null;
+      },
+    );
   }
 
   /// 执行 HTTP 请求并回调给 JavaScript

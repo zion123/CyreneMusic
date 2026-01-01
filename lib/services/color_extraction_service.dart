@@ -28,25 +28,28 @@ class ColorExtractionResult {
   /// 获取主题色（优先级：vibrant > dominant > muted）
   Color? get themeColor => vibrantColor ?? dominantColor ?? mutedColor;
 
-  /// 获取动态背景所需的3个颜色
+  /// 获取动态背景所需的色彩合集 (最少 5 个)
   List<Color> get dynamicColors {
     final colors = <Color>[];
-    
-    // 优先使用 vibrant 和 muted 颜色
-    if (vibrantColor != null) colors.add(vibrantColor!);
-    if (mutedColor != null) colors.add(mutedColor!);
-    if (dominantColor != null && colors.length < 3) colors.add(dominantColor!);
-    if (lightVibrantColor != null && colors.length < 3) colors.add(lightVibrantColor!);
-    if (darkVibrantColor != null && colors.length < 3) colors.add(darkVibrantColor!);
-    if (lightMutedColor != null && colors.length < 3) colors.add(lightMutedColor!);
-    if (darkMutedColor != null && colors.length < 3) colors.add(darkMutedColor!);
-    
-    // 如果颜色不足3个，用默认颜色填充
-    while (colors.length < 3) {
-      colors.add(const Color(0xFF424242)); // Colors.grey[800]
+    final candidates = [
+      vibrantColor,
+      mutedColor,
+      dominantColor,
+      darkVibrantColor,
+      lightVibrantColor,
+      darkMutedColor,
+      lightMutedColor,
+    ];
+
+    for (final c in candidates) {
+      if (c != null && !colors.contains(c)) {
+        colors.add(c);
+      }
     }
     
-    return colors.take(3).toList();
+    // 如果色彩不足 5 个，会在 MeshGradientBackground 的逻辑中进行生成/补偿
+    // 这里仅保证尽可能多地提供原始色彩
+    return colors;
   }
 }
 
@@ -215,10 +218,10 @@ ColorExtractionResult? _extractColorsInIsolate(_ColorExtractionParams params) {
 
         if (a < 128) continue; // 跳过透明像素
 
-        // 量化颜色以减少颜色数量
-        final quantizedR = (r ~/ 16) * 16;
-        final quantizedG = (g ~/ 16) * 16;
-        final quantizedB = (b ~/ 16) * 16;
+        // 量化颜色以减少颜色数量（使用较小的步长以提高精度）
+        final quantizedR = (r ~/ 8) * 8;
+        final quantizedG = (g ~/ 8) * 8;
+        final quantizedB = (b ~/ 8) * 8;
         final colorValue = (255 << 24) | (quantizedR << 16) | (quantizedG << 8) | quantizedB;
 
         colorCounts[colorValue] = (colorCounts[colorValue] ?? 0) + 1;

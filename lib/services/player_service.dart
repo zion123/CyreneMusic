@@ -2018,4 +2018,3 @@ class PlayerService extends ChangeNotifier {
     }
   }
 }
-

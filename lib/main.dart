@@ -254,20 +254,8 @@ Future<void> main() async {
         }
       });
 
-      await timed('FlutterDisplayMode.setHighRefreshRate', () async {
-        try {
-          await FlutterDisplayMode.setHighRefreshRate();
-          final activeMode = await FlutterDisplayMode.active;
-          log(
-              ' 显示模式: ${activeMode.width}x${activeMode.height} @${activeMode.refreshRate.toStringAsFixed(0)}Hz');
-          print(
-              ' [DisplayMode] 已启用高刷新率: ${activeMode.refreshRate.toStringAsFixed(0)}Hz');
-        } catch (e) {
-          log(' 高刷新率设置失败: $e');
-          print(' [DisplayMode] 设置高刷新率失败: $e');
-        }
-      });
     }
+
   
     await timed('SystemMediaService.initialize', () async {
       await SystemMediaService().initialize();
@@ -356,10 +344,43 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    // 延迟设置回调，确保 Navigator 已经初始化
+    // 延迟设置高刷新率和回调，确保 Navigator 和 Activity 已经初始化
     Future.delayed(const Duration(milliseconds: 500), () {
       _setupAudioSourceCallback();
+      _setupHighRefreshRate();
     });
+  }
+
+  Future<void> _setupHighRefreshRate() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      // 获取所有可用的模式
+      final modes = await FlutterDisplayMode.supported;
+      if (modes.isNotEmpty) {
+        print(' [DisplayMode] 发现 ${modes.length} 个可用模式:');
+        for (var mode in modes) {
+          print('   - ID: ${mode.id}, ${mode.width}x${mode.height} @${mode.refreshRate.toStringAsFixed(0)}Hz');
+        }
+
+        // 挑选最高刷新率模式
+        final optimalMode = modes.reduce((curr, next) {
+          if (next.refreshRate > curr.refreshRate) return next;
+          if (next.refreshRate == curr.refreshRate && (next.width * next.height) > (curr.width * curr.height)) return next;
+          return curr;
+        });
+
+        print(' [DisplayMode] 尝试设置最高刷新率模式: ID: ${optimalMode.id}, ${optimalMode.width}x${optimalMode.height} @${optimalMode.refreshRate.toStringAsFixed(0)}Hz');
+        await FlutterDisplayMode.setPreferredMode(optimalMode);
+      } else {
+        await FlutterDisplayMode.setHighRefreshRate();
+      }
+
+      final activeMode = await FlutterDisplayMode.active;
+      print(' [DisplayMode] 最终激活模式: ${activeMode.width}x${activeMode.height} @${activeMode.refreshRate.toStringAsFixed(0)}Hz');
+    } catch (e) {
+      print(' [DisplayMode] 设置高刷新率失败: $e');
+    }
   }
 
   void _setupAudioSourceCallback() {

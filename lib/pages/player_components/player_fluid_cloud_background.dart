@@ -146,7 +146,7 @@ class _PlayerFluidCloudBackgroundState extends State<PlayerFluidCloudBackground>
       // 使用 ColorExtractionService 在 isolate 中提取颜色
       final result = await ColorExtractionService().extractColorsFromUrl(
         imageUrl,
-        sampleSize: 32, // 小尺寸以提升性能
+        sampleSize: 64, // 增加采样尺寸以提升准确率
         timeout: const Duration(seconds: 3),
       );
 
@@ -220,7 +220,7 @@ class _PlayerFluidCloudBackgroundState extends State<PlayerFluidCloudBackground>
     return RepaintBoundary(
       child: MeshGradientBackground(
         colors: _dynamicColors,
-        speed: 0.3,
+        speed: 0.35,
         backgroundColor: _dynamicColors.isNotEmpty ? _dynamicColors[0] : greyColor,
         animate: true,
       ),

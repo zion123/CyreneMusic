@@ -8,14 +8,14 @@ import '../../services/lyric_font_service.dart';
 import '../../services/lyric_style_service.dart';
 import '../../models/lyric_line.dart';
 
-/// 核心：弹性间距动画 + 波浪式延迟 (1:1 复刻 HTML)
-class PlayerFluidCloudLyricsPanel extends StatefulWidget {
+/// 移动端流体云歌词面板 - 由桌面端 PlayerFluidCloudLyricsPanel 复制而来，用于独立适配
+class MobilePlayerFluidCloudLyricsPanel extends StatefulWidget {
   final List<LyricLine> lyrics;
   final int currentLyricIndex;
   final bool showTranslation;
   final int visibleLineCount;
 
-  const PlayerFluidCloudLyricsPanel({
+  const MobilePlayerFluidCloudLyricsPanel({
     super.key,
     required this.lyrics,
     required this.currentLyricIndex,
@@ -24,14 +24,13 @@ class PlayerFluidCloudLyricsPanel extends StatefulWidget {
   });
 
   @override
-  State<PlayerFluidCloudLyricsPanel> createState() => _PlayerFluidCloudLyricsPanelState();
+  State<MobilePlayerFluidCloudLyricsPanel> createState() => _MobilePlayerFluidCloudLyricsPanelState();
 }
 
-class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPanel>
+class _MobilePlayerFluidCloudLyricsPanelState extends State<MobilePlayerFluidCloudLyricsPanel>
     with TickerProviderStateMixin {
   
-  // 核心变量 - 对应 CSS var(--line-height)
-  // HTML 中是 80px，这里我们也用 80 逻辑像素
+  // 核心变量
   final double _lineHeight = 80.0; 
   
   // 滚动/拖拽相关
@@ -39,7 +38,7 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
   bool _isDragging = false;
   Timer? _dragResetTimer;
 
-  // [New] 布局缓存
+  // 布局缓存
   final Map<String, double> _heightCache = {};
   double? _lastViewportWidth;
   String? _lastFontFamily;
@@ -56,7 +55,6 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     super.dispose();
   }
 
-  // 简单的拖拽手势处理，允许用户微调查看
   void _onDragStart(DragStartDetails details) {
     setState(() {
       _isDragging = true;
@@ -71,7 +69,6 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
   }
 
   void _onDragEnd(DragEndDetails details) {
-     // 拖拽结束后，延时回弹归位
      _dragResetTimer = Timer(const Duration(milliseconds: 600), () {
        if (mounted) {
          setState(() {
@@ -97,32 +94,25 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
             final viewportHeight = constraints.maxHeight;
             final viewportWidth = constraints.maxWidth;
             
-            // 根据对齐设置动态计算中心点偏移
-            // 居中对齐：50%; 顶部对齐：25% (稍微靠上但不至于刷到最顶部)
             final centerY = lyricStyle.currentAlignment == LyricAlignment.center 
                 ? viewportHeight * 0.5 
                 : viewportHeight * 0.25;
             
-            // 可视区域计算
             final visibleBuffer = 6; 
-            final visibleLines = (viewportHeight / _lineHeight).ceil(); // 估算
+            final visibleLines = (viewportHeight / _lineHeight).ceil();
             final minIndex = max(0, widget.currentLyricIndex - visibleBuffer - (visibleLines ~/ 2));
             final maxIndex = min(widget.lyrics.length - 1, widget.currentLyricIndex + visibleBuffer + (visibleLines ~/ 2));
 
-            // [New] 动态高度计算
-            // 1. 计算每个可见 Item 的高度
             final Map<int, double> heights = {};
-            final textMaxWidth = viewportWidth - 80; // horizontal padding 40 * 2
+            final textMaxWidth = viewportWidth - 40; // horizontal padding 20 * 2
             
             for (int i = minIndex; i <= maxIndex; i++) {
               heights[i] = _measureLyricItemHeight(i, textMaxWidth);
             }
 
-            // 2. 计算偏移量 (相对于 activeIndex 中心)
             final Map<int, double> offsets = {};
             offsets[widget.currentLyricIndex] = 0;
 
-            // 向下累加 (active + 1, active + 2 ...)
             double currentOffset = 0;
             double prevHalfHeight = (heights[widget.currentLyricIndex] ?? _lineHeight) / 2;
             
@@ -133,7 +123,6 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
               prevHalfHeight = h / 2;
             }
 
-            // 向上累加 (active - 1, active - 2 ...)
             currentOffset = 0;
             double nextHalfHeight = (heights[widget.currentLyricIndex] ?? _lineHeight) / 2;
             
@@ -165,13 +154,11 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     );
   }
 
-  /// 估算歌词项高度
   double _measureLyricItemHeight(int index, double maxWidth) {
     if (index < 0 || index >= widget.lyrics.length) return _lineHeight;
     final lyric = widget.lyrics[index];
     final fontFamily = LyricFontService().currentFontFamily ?? 'Microsoft YaHei';
     
-    // [Optimization] 检查缓存
     final cacheKey = '${lyric.startTime.inMilliseconds}_${lyric.text.hashCode}_$maxWidth';
     if (_lastViewportWidth == maxWidth && 
         _lastFontFamily == fontFamily && 
@@ -180,9 +167,8 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
       return _heightCache[cacheKey]!;
     }
 
-    final fontSize = 32.0; // 与 _buildInnerContent 保持一致
+    final fontSize = 28.8; // 32.0 * 0.9
 
-    // 测量原文高度 (maxLines: 2)
     final textPainter = TextPainter(
       text: TextSpan(
         text: lyric.text,
@@ -194,38 +180,31 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
         ),
       ),
       textDirection: TextDirection.ltr,
-      // 移除 maxLines 限制，实现自适应宽度换行后的真实高度测量
     );
     textPainter.layout(maxWidth: maxWidth);
-    double h = textPainter.height * 1.3 / 1.1; // 增加行高比例
+    double h = textPainter.height * 1.3 / 1.1;
 
-    // 测量翻译高度
     if (widget.showTranslation && lyric.translation != null && lyric.translation!.isNotEmpty) {
       final transPainter = TextPainter(
         text: TextSpan(
           text: lyric.translation,
           style: TextStyle(
             fontFamily: fontFamily,
-            fontSize: 18, // 与 _buildInnerContent 保持一致
+            fontSize: 16.2, // 18 * 0.9
             fontWeight: FontWeight.w600,
             height: 1.0,
           ),
         ),
         textDirection: TextDirection.ltr,
-        // 翻译也支持换行测量
       );
       transPainter.layout(maxWidth: maxWidth);
-      h += 8.0; // 增加原文与译文之间的间距
-      h += transPainter.height * 1.4; // 增加译文自身的行高
+      h += 8.0;
+      h += transPainter.height * 1.4;
     }
     
-    // 增加一点基础 Padding 上下余量，避免太拥挤
     h += 24.0; 
-    
-    // 保证最小高度，避免空行太窄
     final result = max(h, _lineHeight);
     
-    // 更新缓存状态
     _lastViewportWidth = maxWidth;
     _lastFontFamily = fontFamily;
     _lastShowTranslation = widget.showTranslation;
@@ -238,27 +217,15 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     final activeIndex = widget.currentLyricIndex;
     final diff = index - activeIndex;
     
-    // 1. 基础位移 (改为使用预计算的相对 Dynamic Offset)
     final double baseTranslation = relativeOffset;
-    
-    // 2. 正弦偏移：保持原有的“果冻”弹性算法
-    // Math.sin(diff * 0.8) * 20
     final double sineOffset = sin(diff * 0.8) * 20.0;
     
-    // 3. 最终Y坐标
-    // centerYOffset 是屏幕中心
-    // baseTranslation 是该 Item 中心相对于屏幕中心的偏移
-    // sineOffset 是动画偏移
-    // 最后要减去 itemHeight / 2 因为 Positioned top 是左上角
     double targetY = centerYOffset + baseTranslation + sineOffset - (itemHeight / 2);
 
-    // 叠加拖拽偏移
     if (_isDragging) {
        targetY += _dragOffset;
     }
     
-    // 4. 缩放逻辑
-    // const scale = i === index ? 1.15 : (Math.abs(diff) < 3 ? 1 - Math.abs(diff) * 0.1 : 0.7);
     double targetScale;
     if (diff == 0) {
       targetScale = 1.15;
@@ -268,8 +235,6 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
       targetScale = 0.7;
     }
 
-    // 5. 透明度逻辑
-    // const opacity = Math.abs(diff) > 4 ? 0 : 1 - Math.abs(diff) * 0.2;
     double targetOpacity;
     if (diff.abs() > 4) {
       targetOpacity = 0.0;
@@ -278,12 +243,8 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     }
     targetOpacity = targetOpacity.clamp(0.0, 1.0).toDouble();
 
-    // 6. 延迟逻辑
-    // transitionDelay = ${Math.abs(diff) * 0.05}s
     final int delayMs = (diff.abs() * 50).toInt();
 
-    // 7. 模糊逻辑
-    // active: 0, near (diff=1): 1px, others: 4px
     double targetBlur = 4.0;
     if (diff == 0) targetBlur = 0.0;
     else if (diff.abs() == 1) targetBlur = 1.0;
@@ -291,7 +252,7 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     final bool isActive = (diff == 0);
 
     return _ElasticLyricLine(
-      key: ValueKey(index), // 保持 Key 稳定以复用 State
+      key: ValueKey(index),
       text: widget.lyrics[index].text,
       translation: widget.lyrics[index].translation,
       lyric: widget.lyrics[index], 
@@ -313,14 +274,12 @@ class _PlayerFluidCloudLyricsPanelState extends State<PlayerFluidCloudLyricsPane
     return const Center(
       child: Text(
         '暂无歌词',
-        style: TextStyle(color: Colors.white54, fontSize: 24),
+        style: TextStyle(color: Colors.white54, fontSize: 21.6), // 24 * 0.9
       ),
     );
   }
 }
 
-/// 能够处理延迟和弹性动画的单行歌词组件
-/// 对应 HTML .lyric-line 及其 CSS transition
 class _ElasticLyricLine extends StatefulWidget {
   final String text;
   final String? translation;
@@ -361,7 +320,6 @@ class _ElasticLyricLine extends StatefulWidget {
 }
 
 class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProviderStateMixin {
-  // 当前动画值
   late double _y;
   late double _scale;
   late double _opacity;
@@ -375,8 +333,6 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
   
   Timer? _delayTimer;
 
-  // HTML CSS: transition: transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)
-  // 这是带回弹的曲线
   static const Curve elasticCurve = Cubic(0.34, 1.56, 0.64, 1.0);
   static const Duration animDuration = Duration(milliseconds: 800);
   
@@ -392,11 +348,7 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
   @override
   void didUpdateWidget(_ElasticLyricLine oldWidget) {
     super.didUpdateWidget(oldWidget);
-    
-    // 使用 Epsilon 阈值防止微小浮点误差/UI抖动导致的动画频繁重启
     const double epsilon = 0.05;
-    
-    // 只在变化显著时才触发动画
     bool positionChanged = (oldWidget.targetY - widget.targetY).abs() > epsilon;
     bool scaleChanged = (oldWidget.targetScale - widget.targetScale).abs() > 0.001;
     bool opacityChanged = (oldWidget.targetOpacity - widget.targetOpacity).abs() > 0.01;
@@ -417,7 +369,6 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
   void _startAnimation() {
     _delayTimer?.cancel();
     
-    // 如果正在拖拽，或者目标一致，则不播放动画
     if (widget.isDragging) {
       _controller?.stop();
       setState(() {
@@ -430,7 +381,6 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
     }
 
     void play() {
-      // 创建新的控制器
       _controller?.dispose();
       _controller = AnimationController(
         vsync: this,
@@ -443,7 +393,6 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
       _scaleAnim = Tween<double>(begin: _scale, end: widget.targetScale).animate(
          CurvedAnimation(parent: _controller!, curve: elasticCurve)
       );
-      // Opacity/Blur 使用 ease，避免回弹导致闪烁
       _opacityAnim = Tween<double>(begin: _opacity, end: widget.targetOpacity).animate(
         CurvedAnimation(parent: _controller!, curve: Curves.ease)
       );
@@ -473,24 +422,22 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
 
   @override
   Widget build(BuildContext context) {
-    // 性能优化：如果透明度极低，不渲染
     if (_opacity < 0.01) return const SizedBox();
 
     return Positioned(
       top: _y,
       left: 0,
       right: 0,
-      // height: widget.lineHeight, // Remove strict height constraint to allow natural wrapping without overflow
       child: Transform.scale(
         scale: _scale,
-        alignment: Alignment.centerLeft, // HTML: transform-origin: left center
+        alignment: Alignment.centerLeft,
         child: Opacity(
           opacity: _opacity,
           child: _OptionalBlur(
             blur: _blur,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 40), // HTML: padding: 0 40px
-              alignment: Alignment.centerLeft, // HTML: display: flex; align-items: center
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              alignment: Alignment.centerLeft,
               child: _buildInnerContent(),
             ),
           ),
@@ -501,33 +448,16 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
 
   Widget _buildInnerContent() {
     final fontFamily = LyricFontService().currentFontFamily ?? 'Microsoft YaHei';
-    
-    // HTML font-size: 2.4rem.
-    // 我们使用固定大小，或者根据需求调整。原 Flutter 代码是 32。
-    final double textFontSize = 32.0;
+    final double textFontSize = 28.8; // 32.0 * 0.9
 
-    // 颜色:
-    // HTML .lyric-line.active -> rgba(255, 255, 255, 1)
-    // HTML .lyric-line -> rgba(255, 255, 255, 0.2)
-    // 我们的 _opacity 已经模拟了整体容器的透明度。
-    // 但是 HTML 同时改变了 color 和 opacity。
-    // Active 行 color 是完全不透明白色。
-    // 非 Active 行 color 是 0.2 白。
-    // 加上容器 opacity，非 Active 行会非常暗 (0.2 * opacity)。
-    // 为了匹配效果，我们需要同时调整 color 的 opacity。
-    
     Color textColor;
     if (widget.isActive) {
       textColor = Colors.white;
     } else {
-      // 匹配 HTML rgba(255, 255, 255, 0.2)
       textColor = Colors.white.withOpacity(0.3); 
     }
     
-    // 构建文本 Widget
     Widget textWidget;
-    // 只有当服务端提供了逐字歌词(hasWordByWord)时，才启用卡拉OK动画
-    // 否则仅保留基础的变白+放大效果 (由 textColor 和 parent scale控制)
     if (widget.isActive && widget.lyric.hasWordByWord) {
       textWidget = _KaraokeText(
         text: widget.text,
@@ -539,7 +469,7 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
              fontSize: textFontSize, 
              fontWeight: FontWeight.w800,
              color: Colors.white,
-             height: 1.3, // 增加行高以减小间距感到拥挤
+             height: 1.3,
         ),
       );
     } else {
@@ -550,12 +480,11 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
           fontSize: textFontSize, 
           fontWeight: FontWeight.w800,
           color: textColor,
-          height: 1.3, // 增加行高以减小间距感到拥挤
+          height: 1.3,
         ),
       );
     }
     
-    // 如果有翻译
     if (widget.showTranslation && widget.translation != null && widget.translation!.isNotEmpty) {
       return Column(
         mainAxisSize: MainAxisSize.min,
@@ -569,10 +498,10 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
               widget.translation!,
               style: TextStyle(
                 fontFamily: fontFamily,
-                fontSize: 18,
+                fontSize: 16.2, // 18 * 0.9
                 fontWeight: FontWeight.w600,
                 color: Colors.white.withOpacity(0.3),
-                height: 1.4, // 增加行高防止译文本身换行时拥挤
+                height: 1.4,
               ),
             ),
           )
@@ -580,7 +509,6 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
       );
     }
     
-    // 如果是第一行，且活跃，显示倒计时点 (Features)
     if (widget.index == 0 && !widget.isDragging) {
        return Column(
         mainAxisSize: MainAxisSize.min,
@@ -597,7 +525,6 @@ class _ElasticLyricLineState extends State<_ElasticLyricLine> with TickerProvide
   }
 }
 
-/// 性能优化：模糊组件
 class _OptionalBlur extends StatelessWidget {
   final double blur;
   final Widget child;
@@ -606,7 +533,6 @@ class _OptionalBlur extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 只有模糊度显着时才渲染滤镜，减少 GPU 合成开销
     if (blur < 1.0) return child;
     return ImageFiltered(
       imageFilter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
@@ -615,14 +541,12 @@ class _OptionalBlur extends StatelessWidget {
   }
 }
 
-/// 卡拉OK文本组件 - 实现逐字填充效果
-/// (保留原有逻辑)
 class _KaraokeText extends StatefulWidget {
   final String text;
   final LyricLine lyric;
   final List<LyricLine> lyrics;
   final int index;
-  final TextStyle originalTextStyle; // 新增：允许外部传入样式
+  final TextStyle originalTextStyle;
 
   const _KaraokeText({
     required this.text,
@@ -639,11 +563,8 @@ class _KaraokeText extends StatefulWidget {
 class _KaraokeTextState extends State<_KaraokeText> with SingleTickerProviderStateMixin {
   late Ticker _ticker;
   double _lineProgress = 0.0;
-  
-  // [Performance] 公用进度通知器，供所有 _WordFillWidget 共享
   final ValueNotifier<Duration> _positionNotifier = ValueNotifier(Duration.zero);
 
-  // 缓存
   double _cachedMaxWidth = 0.0;
   TextStyle? _cachedStyle;
   int _cachedLineCount = 1;
@@ -681,12 +602,9 @@ class _KaraokeTextState extends State<_KaraokeText> with SingleTickerProviderSta
 
   void _onTick(Duration elapsed) {
     if (!mounted) return;
-
     final currentPos = PlayerService().position;
-    // 更新广播通知器
     _positionNotifier.value = currentPos;
 
-    // 处理行级进度 (针对非逐字模式)
     if (!widget.lyric.hasWordByWord || widget.lyric.words == null) {
       final elapsedFromStart = currentPos - widget.lyric.startTime;
       final newProgress = (elapsedFromStart.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0);
@@ -699,7 +617,6 @@ class _KaraokeTextState extends State<_KaraokeText> with SingleTickerProviderSta
     }
   }
   
-  // 简化版布局缓存，因为现在是单行/Wrap 为主
   void _updateLayoutCache(BoxConstraints constraints, TextStyle style) {
     if (_cachedMaxWidth == constraints.maxWidth && _cachedStyle == style) return;
     _cachedMaxWidth = constraints.maxWidth;
@@ -730,13 +647,10 @@ class _KaraokeTextState extends State<_KaraokeText> with SingleTickerProviderSta
 
   @override
   Widget build(BuildContext context) {
-    // 使用传入的样式
     final style = widget.originalTextStyle;
-
     if (widget.lyric.hasWordByWord && widget.lyric.words != null && widget.lyric.words!.isNotEmpty) {
       return _buildWordByWordEffect(style);
     }
-
     return LayoutBuilder(
       builder: (context, constraints) {
         _updateLayoutCache(constraints, style);
@@ -750,7 +664,7 @@ class _KaraokeTextState extends State<_KaraokeText> with SingleTickerProviderSta
     return Wrap(
       alignment: WrapAlignment.start,
       crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 8.0, // 增加卡拉OK换行间距
+      runSpacing: 2.0, 
       children: List.generate(words.length, (index) {
         final word = words[index];
         return _WordFillWidget(
@@ -758,7 +672,7 @@ class _KaraokeTextState extends State<_KaraokeText> with SingleTickerProviderSta
           text: word.text,
           word: word,
           style: style,
-          positionNotifier: _positionNotifier, // 传递共享通知器
+          positionNotifier: _positionNotifier,
         );
       }),
     );
@@ -782,58 +696,31 @@ class _KaraokeTextState extends State<_KaraokeText> with SingleTickerProviderSta
       );
     }
     
-    // 多行逻辑：计算每行进度
     double line1Progress = 0.0; 
     double line2Progress = 0.0;
     
     if (_lineProgress <= _line1Ratio) {
-      // 正在播放第一行
-      if (_line1Ratio > 0) {
-        line1Progress = _lineProgress / _line1Ratio;
-      }
+      if (_line1Ratio > 0) line1Progress = _lineProgress / _line1Ratio;
       line2Progress = 0.0;
     } else {
-      // 第一行已播完，正在播放第二行
       line1Progress = 1.0;
-      if (_line1Ratio < 1.0) {
-        line2Progress = (_lineProgress - _line1Ratio) / (1.0 - _line1Ratio);
-      }
+      if (_line1Ratio < 1.0) line2Progress = (_lineProgress - _line1Ratio) / (1.0 - _line1Ratio);
     }
     
-    final dimText = Text(
-      widget.text,
-      style: style.copyWith(color: const Color(0x99FFFFFF)),
-    );
-    
-    final brightText = Text(
-      widget.text,
-      style: style.copyWith(color: Colors.white),
-    );
+    final dimText = Text(widget.text, style: style.copyWith(color: const Color(0x99FFFFFF)));
+    final brightText = Text(widget.text, style: style.copyWith(color: Colors.white));
     
     return RepaintBoundary(
       child: Stack(
         children: [
           dimText,
-          // 第一行裁剪
           ClipRect(
-            clipper: _LineClipper(
-              lineIndex: 0,
-              progress: line1Progress,
-              lineHeight: _line1Height,
-              lineWidth: _line1Width,
-            ),
+            clipper: _LineClipper(lineIndex: 0, progress: line1Progress, lineHeight: _line1Height, lineWidth: _line1Width),
             child: brightText,
           ),
-          // 第二行裁剪
           if (_cachedLineCount > 1)
             ClipRect(
-              clipper: _LineClipper(
-                lineIndex: 1,
-                progress: line2Progress,
-                lineHeight: _line2Height + 10,
-                lineWidth: _line2Width,
-                yOffset: _line1Height,
-              ),
+              clipper: _LineClipper(lineIndex: 1, progress: line2Progress, lineHeight: _line2Height + 10, lineWidth: _line2Width, yOffset: _line1Height),
               child: brightText,
             ),
         ],
@@ -846,7 +733,7 @@ class _WordFillWidget extends StatefulWidget {
   final String text;
   final LyricWord word;
   final TextStyle style;
-  final ValueNotifier<Duration> positionNotifier; // 新增
+  final ValueNotifier<Duration> positionNotifier;
 
   const _WordFillWidget({
     Key? key,
@@ -861,63 +748,37 @@ class _WordFillWidget extends StatefulWidget {
 }
 
 class _WordFillWidgetState extends State<_WordFillWidget> with TickerProviderStateMixin {
-  // 移除 _ticker，改用父级广播
   late AnimationController _floatController;
   late Animation<double> _floatOffset;
   double _progress = 0.0;
   bool? _isAsciiCached;
 
   static const double fadeRatio = 0.3;
-  // 上浮的最大偏移量 (像素)
-  static const double maxFloatOffset = -3.0; // 从 -5.0 缩小到 -3.0
+  static const double maxFloatOffset = -3.0;
 
   @override
   void initState() {
     super.initState();
-    
-    _floatController = AnimationController(
-       vsync: this,
-       duration: const Duration(milliseconds: 500),
-    );
-    _floatOffset = Tween<double>(begin: 0.0, end: maxFloatOffset).animate(
-      CurvedAnimation(parent: _floatController, curve: Curves.easeOutBack),
-    );
-
+    _floatController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+    _floatOffset = Tween<double>(begin: 0.0, end: maxFloatOffset).animate(CurvedAnimation(parent: _floatController, curve: Curves.easeOutBack));
     _updateProgress(widget.positionNotifier.value); 
-    
-    // 监听父级进度广播
     widget.positionNotifier.addListener(_onPositionUpdate);
-
-    // 根据初始进度设置上浮状态
-    const double threshold = 0.5;
-    if (_progress >= threshold) {
-      _floatController.value = 1.0;
-    }
+    if (_progress >= 0.5) _floatController.value = 1.0;
   }
 
   void _onPositionUpdate() {
      if (!mounted) return;
      final oldProgress = _progress;
      _updateProgress(widget.positionNotifier.value);
-
      const double threshold = 0.5;
-
-     // 进度达到阈值时触发上浮
      if (_progress >= threshold && oldProgress < threshold) {
        _floatController.forward();
      } else if (_progress < threshold && oldProgress >= threshold) {
        _floatController.reverse();
      }
-
-     // 性能核心：只有进度显着变化时才 setState
-     // 对于非英文，保持 0.005 的阈值以节省性能
-     // 对于英文，由于要计算复杂的波浪偏移，需要更高的采样频率
      final isAscii = _isAsciiText();
      final thresholdVal = isAscii ? 0.001 : 0.005;
-
-     if ((oldProgress - _progress).abs() > thresholdVal || 
-         (_progress >= 1.0 && oldProgress < 1.0) ||
-         (_progress <= 0.0 && oldProgress > 0.0)) {
+     if ((oldProgress - _progress).abs() > thresholdVal || (_progress >= 1.0 && oldProgress < 1.0) || (_progress <= 0.0 && oldProgress > 0.0)) {
        setState(() {});
      }
   }
@@ -930,35 +791,18 @@ class _WordFillWidgetState extends State<_WordFillWidget> with TickerProviderSta
       widget.positionNotifier.addListener(_onPositionUpdate);
     }
     _updateProgress(widget.positionNotifier.value);
-    
-    const double threshold = 0.5;
-
-    // 处理上浮动画状态（支持 Seek）
-    if (_progress >= threshold) {
-      if (!_floatController.isAnimating && _floatController.value < 1.0) {
-        _floatController.forward();
-      }
-    } else {
-      if (!_floatController.isAnimating && _floatController.value > 0.0) {
-        _floatController.reverse();
-      }
-    }
+    if (_progress >= 0.5) { if (!_floatController.isAnimating && _floatController.value < 1.0) _floatController.forward(); } 
+    else { if (!_floatController.isAnimating && _floatController.value > 0.0) _floatController.reverse(); }
   }
 
   void _updateProgress(Duration currentPos) {
-    if (currentPos < widget.word.startTime) {
-      _progress = 0.0;
-    } else if (currentPos >= widget.word.endTime) {
-      _progress = 1.0;
-    } else {
+    if (currentPos < widget.word.startTime) _progress = 0.0;
+    else if (currentPos >= widget.word.endTime) _progress = 1.0;
+    else {
       final wordDuration = widget.word.duration.inMilliseconds;
-      if (wordDuration <= 0) {
-         _progress = 1.0;
-      } else {
-         final wordElapsed = currentPos - widget.word.startTime;
-         _progress = (wordElapsed.inMilliseconds / wordDuration).clamp(0.0, 1.0);
-      }
+      _progress = (wordDuration <= 0) ? 1.0 : (currentPos - widget.word.startTime).inMilliseconds / wordDuration;
     }
+    _progress = _progress.clamp(0.0, 1.0);
   }
 
   @override
@@ -970,36 +814,21 @@ class _WordFillWidgetState extends State<_WordFillWidget> with TickerProviderSta
 
   bool _isAsciiText() {
     if (_isAsciiCached != null) return _isAsciiCached!;
-    if (widget.text.isEmpty) {
-      _isAsciiCached = false;
-      return false;
-    }
+    if (widget.text.isEmpty) return _isAsciiCached = false;
     int asciiCount = 0;
     for (final char in widget.text.runes) {
       if ((char >= 65 && char <= 90) || (char >= 97 && char <= 122)) asciiCount++;
     }
-    _isAsciiCached = asciiCount > widget.text.length / 2;
-    return _isAsciiCached!;
+    return _isAsciiCached = asciiCount > widget.text.length / 2;
   }
-
 
   @override
   Widget build(BuildContext context) {
     final useLetterAnimation = _isAsciiText() && widget.text.length > 1;
-    
     return RepaintBoundary(
       child: AnimatedBuilder(
         animation: _floatOffset,
-        builder: (context, child) {
-          // 如果开启了逐字母动画，父级的位移仅作为整体辅助，或者根据需要禁用
-          // 这里我们让英文状态下父级 Transform 失效，完全由子项控制
-          final double effectiveY = useLetterAnimation ? 0.0 : _floatOffset.value;
-          
-          return Transform.translate(
-            offset: Offset(0, effectiveY),
-            child: child,
-          );
-        },
+        builder: (context, child) => Transform.translate(offset: Offset(0, useLetterAnimation ? 0.0 : _floatOffset.value), child: child),
         child: _buildInner(),
       ),
     );
@@ -1011,131 +840,49 @@ class _WordFillWidgetState extends State<_WordFillWidget> with TickerProviderSta
   }
   
   Widget _buildWholeWordEffect() {
-    // 统一使用 4-stops 结构的 LinearGradient，避免 GPU 重新编译着色器导致闪烁
-    List<Color> gradientColors;
-    List<double> gradientStops;
-    
-    if (_progress <= 0.0) {
-      gradientColors = const [Color(0x99FFFFFF), Color(0x99FFFFFF)];
-      gradientStops = const [0.0, 1.0];
-    } else if (_progress >= 1.0) {
-      gradientColors = const [Colors.white, Colors.white];
-      gradientStops = const [0.0, 1.0];
-    } else {
-      // 核心：在进度锋面插入一个更亮的点来模拟“发光扫描线”
-      const double glowWidth = 0.05; // 光条宽度
-      gradientColors = [
-        Colors.white.withOpacity(0.9), // 已播部分
-        Colors.white,                  // 光条起点
-        Colors.white,                  // 光条最亮部 (进度所在位置)
-        const Color(0x99FFFFFF),       // 渐变过渡
-        const Color(0x99FFFFFF),       // 未播部分
-      ];
-      gradientStops = [
-        0.0,
-        (_progress - glowWidth).clamp(0.0, 1.0),
-        _progress,
-        (_progress + fadeRatio).clamp(0.0, 1.0),
-        1.0,
-      ];
+    List<Color> colors; List<double> stops;
+    if (_progress <= 0.0) { colors = [const Color(0x99FFFFFF), const Color(0x99FFFFFF)]; stops = [0.0, 1.0]; }
+    else if (_progress >= 1.0) { colors = [Colors.white, Colors.white]; stops = [0.0, 1.0]; }
+    else {
+      const double glowW = 0.05;
+      colors = [Colors.white.withOpacity(0.9), Colors.white, Colors.white, const Color(0x99FFFFFF), const Color(0x99FFFFFF)];
+      stops = [0.0, (_progress - glowW).clamp(0.0, 1.0), _progress, (_progress + fadeRatio).clamp(0.0, 1.0), 1.0];
     }
-
     return ShaderMask(
-      shaderCallback: (bounds) => LinearGradient(
-        colors: gradientColors,
-        stops: gradientStops,
-      ).createShader(bounds),
+      shaderCallback: (bounds) => LinearGradient(colors: colors, stops: stops).createShader(bounds),
       blendMode: BlendMode.srcIn,
-      // Padding 扩展边界：适当增加高度以容纳 descenders (g, y, q) 防止 ShaderMask 剪裁产生白边
-      child: Padding(
-        padding: const EdgeInsets.only(top: 6.0, bottom: 6.0),
-        child: Text(widget.text, style: widget.style.copyWith(color: Colors.white)),
-      ),
+      child: Padding(padding: const EdgeInsets.symmetric(vertical: 3.0), child: Text(widget.text, style: widget.style.copyWith(color: Colors.white))),
     );
   }
 
   Widget _buildLetterByLetterEffect() {
     final letters = widget.text.split('');
-    final letterCount = letters.length;
-    
-    // 波浪参数
-    const double rippleWidth = 1.2; // 波浪影响的范围因子 (相对于单个字母宽度)
-    const double maxLetterFloat = -4.0; // 字母上浮最大高度 (从 -6.0 缩小到 -4.0)
-
+    const double rippleW = 1.2; const double maxLetterFloat = -4.0;
     return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: List.generate(letterCount, (index) {
-        final letter = letters[index];
-        final baseWidth = 1.0 / letterCount;
-        
-        // --- 1. 计算填充进度 (ShaderMask) ---
-        final fillStart = index * baseWidth;
-        final fillEnd = (index + 1) * baseWidth;
-        final fillProgress = ((_progress - fillStart) / (fillEnd - fillStart)).clamp(0.0, 1.0);
-
-        // --- 2. 计算上浮偏移 (Ripple Animation) ---
-        final letterCenter = (index + 0.5) * baseWidth;
-        double currentLetterOffset = 0.0;
-        
-        if (_progress <= 0.0) {
-          // 初始状态强制为 0，防止第一位字符抖动
-          currentLetterOffset = 0.0;
-        } else if (_progress >= fillEnd) {
-          currentLetterOffset = maxLetterFloat;
-        } else {
-          // 只有当进度接近该字母时才开始带动
-          // 稍微延迟带动时机，防止第一个字母在播放前由于 rippleWidth 太大而浮起
-          final startTrigger = (fillStart - (baseWidth * rippleWidth)).clamp(0.001, 1.0);
-          if (_progress > startTrigger) {
-            final t = ((_progress - startTrigger) / (fillEnd - startTrigger)).clamp(0.0, 1.0);
-            currentLetterOffset = Curves.easeOut.transform(t) * maxLetterFloat;
-          }
+      mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic,
+      children: List.generate(letters.length, (index) {
+        final baseW = 1.0 / letters.length;
+        final fStart = index * baseW; final fEnd = (index + 1) * baseW;
+        final fProgress = ((_progress - fStart) / (fEnd - fStart)).clamp(0.0, 1.0);
+        double lOffset = 0.0;
+        if (_progress >= fEnd) lOffset = maxLetterFloat;
+        else if (_progress > max(0.001, fStart - (baseW * rippleW))) {
+           lOffset = Curves.easeOut.transform(((_progress - max(0.001, fStart - (baseW * rippleW))) / (fEnd - max(0.001, fStart - (baseW * rippleW)))).clamp(0.0, 1.0)) * maxLetterFloat;
         }
-
-        // --- 3. 构建 ShaderMask ---
-        // 填充前端发光渐变
-        List<Color> lColors;
-        List<double> lStops;
-        
-        if (fillProgress <= 0.0) {
-          lColors = const [Color(0x99FFFFFF), Color(0x99FFFFFF)];
-          lStops = const [0.0, 1.0];
-        } else if (fillProgress >= 1.0) {
-          lColors = const [Colors.white, Colors.white];
-          lStops = const [0.0, 1.0];
-        } else {
-          const double glowW = 0.15; // 字母内发光稍微宽一点
-          lColors = [
-            Colors.white.withOpacity(0.9),
-            Colors.white,
-            Colors.white,
-            const Color(0x99FFFFFF),
-            const Color(0x99FFFFFF),
-          ];
-          lStops = [
-            0.0,
-            (fillProgress - glowW).clamp(0.0, 1.0),
-            fillProgress,
-            (fillProgress + fadeRatio).clamp(0.0, 1.0),
-            1.0,
-          ];
+        List<Color> colors; List<double> stops;
+        if (fProgress <= 0.0) { colors = [const Color(0x99FFFFFF), const Color(0x99FFFFFF)]; stops = [0.0, 1.0]; }
+        else if (fProgress >= 1.0) { colors = [Colors.white, Colors.white]; stops = [0.0, 1.0]; }
+        else {
+          const double gW = 0.15;
+          colors = [Colors.white.withOpacity(0.9), Colors.white, Colors.white, const Color(0x99FFFFFF), const Color(0x99FFFFFF)];
+          stops = [0.0, (fProgress - gW).clamp(0.0, 1.0), fProgress, (fProgress + fadeRatio).clamp(0.0, 1.0), 1.0];
         }
-
         return Transform.translate(
-          offset: Offset(0, currentLetterOffset),
+          offset: Offset(0, lOffset),
           child: ShaderMask(
-            shaderCallback: (bounds) => LinearGradient(
-              colors: lColors,
-              stops: lStops,
-            ).createShader(bounds),
+            shaderCallback: (bounds) => LinearGradient(colors: colors, stops: stops).createShader(bounds),
             blendMode: BlendMode.srcIn,
-            // Padding 扩展边界：防止 ShaderMask 剪裁产生的边界伪影
-            child: Padding(
-              padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
-              child: Text(letter, style: widget.style.copyWith(color: Colors.white)),
-            ),
+            child: Padding(padding: const EdgeInsets.symmetric(vertical: 4.0), child: Text(letters[index], style: widget.style.copyWith(color: Colors.white))),
           ),
         );
       }),
@@ -1143,164 +890,67 @@ class _WordFillWidgetState extends State<_WordFillWidget> with TickerProviderSta
   }
 }
 
-/// 裁剪器 (保留但可能未被直接使用，防止报错)
 class _LineClipper extends CustomClipper<Rect> {
-  final int lineIndex;
-  final double progress;
-  final double lineHeight;
-  final double lineWidth;
-  final double yOffset;
+  final int lineIndex; final double progress; final double lineHeight; final double lineWidth; final double yOffset;
   _LineClipper({required this.lineIndex, required this.progress, required this.lineHeight, required this.lineWidth, this.yOffset = 0.0});
   @override Rect getClip(Size size) => Rect.fromLTWH(0, yOffset, lineWidth * progress, lineHeight);
   @override bool shouldReclip(_LineClipper oldClipper) => oldClipper.progress != progress;
 }
 
-/// 倒计时点组件 - Apple Music 风格 (保留)
 class _CountdownDots extends StatefulWidget {
-  final List<LyricLine> lyrics;
-  final double countdownThreshold;
+  final List<LyricLine> lyrics; final double countdownThreshold;
   const _CountdownDots({required this.lyrics, required this.countdownThreshold});
   @override State<_CountdownDots> createState() => _CountdownDotsState();
 }
 
 class _CountdownDotsState extends State<_CountdownDots> with TickerProviderStateMixin {
-  late Ticker _ticker;
-  double _progress = 0.0;
-  bool _isVisible = false;
-  bool _wasVisible = false;
-  late AnimationController _appearController;
-  late Animation<double> _appearAnimation;
-  
-  static const int _dotCount = 3;
-
+  late Ticker _ticker; double _progress = 0.0; bool _isVisible = false; bool _wasVisible = false;
+  late AnimationController _appearController; late Animation<double> _appearAnimation;
   @override
   void initState() {
     super.initState();
     _appearController = AnimationController(duration: const Duration(milliseconds: 400), vsync: this);
     _appearAnimation = CurvedAnimation(parent: _appearController, curve: Curves.easeOutBack, reverseCurve: Curves.easeInBack);
-    _ticker = createTicker(_onTick);
-    _ticker.start();
+    _ticker = createTicker(_onTick); _ticker.start();
   }
-
-  @override
-  void dispose() {
-    _ticker.dispose();
-    _appearController.dispose();
-    super.dispose();
-  }
-
+  @override void dispose() { _ticker.dispose(); _appearController.dispose(); super.dispose(); }
   void _onTick(Duration elapsed) {
     if (widget.lyrics.isEmpty) return;
-    final firstLyricTime = widget.lyrics.first.startTime;
-    final currentPos = PlayerService().position;
-    final timeUntilFirstLyric = (firstLyricTime - currentPos).inMilliseconds / 1000.0;
-    final isPlaying = PlayerService().isPlaying;
-    final shouldShow = isPlaying && currentPos.inMilliseconds > 0 && timeUntilFirstLyric > 0 && timeUntilFirstLyric <= widget.countdownThreshold;
-
+    final timeUntilFirstLyric = (widget.lyrics.first.startTime - PlayerService().position).inMilliseconds / 1000.0;
+    final shouldShow = PlayerService().isPlaying && PlayerService().position.inMilliseconds > 0 && timeUntilFirstLyric > 0 && timeUntilFirstLyric <= widget.countdownThreshold;
     if (shouldShow) {
-      final newProgress = 1.0 - (timeUntilFirstLyric / widget.countdownThreshold);
-      if (!_wasVisible) {
-        _wasVisible = true;
-        _appearController.forward();
-      }
-      if (!_isVisible || (newProgress - _progress).abs() > 0.01) {
-        setState(() {
-          _isVisible = true;
-          _progress = newProgress.clamp(0.0, 1.0);
-        });
-      }
+      if (!_wasVisible) { _wasVisible = true; _appearController.forward(); }
+      setState(() { _isVisible = true; _progress = (1.0 - (timeUntilFirstLyric / widget.countdownThreshold)).clamp(0.0, 1.0); });
     } else if (_isVisible || _wasVisible) {
-      if (_wasVisible) {
-        _wasVisible = false;
-        _appearController.reverse();
-      }
-      setState(() {
-        _isVisible = false;
-        _progress = 0.0;
-      });
+      if (_wasVisible) { _wasVisible = false; _appearController.reverse(); }
+      setState(() { _isVisible = false; _progress = 0.0; });
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _appearAnimation,
       builder: (context, child) {
         if (_appearAnimation.value <= 0.01 && !_isVisible) return const SizedBox.shrink();
-        
-        return RepaintBoundary(
-          child: SizedBox(
-            height: 20,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(_dotCount, (index) {
-                final dotStartProgress = index / _dotCount;
-                final dotEndProgress = (index + 1) / _dotCount;
-                double dotProgress = 0.0;
-                if (_progress > dotStartProgress) {
-                   dotProgress = (_progress - dotStartProgress) / (dotEndProgress - dotStartProgress);
-                   if (_progress >= dotEndProgress) dotProgress = 1.0;
-                }
-                
-                final staggerDelay = index * 0.15;
-                double appearScale = 0.0;
-                if (_appearAnimation.value >= staggerDelay) {
-                  appearScale = ((_appearAnimation.value - staggerDelay) / (1.0 - staggerDelay)).clamp(0.0, 1.0);
-                }
-                
-                return Padding(
-                  padding: const EdgeInsets.only(right: 16.0),
-                  child: Transform.scale(
-                    scale: _easeOutBack(appearScale),
-                    child: _CountdownDot(
-                      size: 12.0,
-                      fillProgress: dotProgress,
-                      appearProgress: appearScale,
-                    ),
-                  ),
-                );
-              }),
-            ),
-          ),
-        );
+        return Row(mainAxisSize: MainAxisSize.min, children: List.generate(3, (index) {
+          final dotP = ((_progress - index/3) / (1/3)).clamp(0.0, 1.0);
+          final appearS = ((_appearAnimation.value - index*0.15) / (1.0 - index*0.15)).clamp(0.0, 1.0);
+          return Padding(padding: const EdgeInsets.only(right: 16.0), child: Transform.scale(scale: _easeOutBack(appearS), child: _CountdownDot(size: 12.0, fillProgress: dotP, appearProgress: appearS)));
+        }));
       },
     );
   }
-  double _easeOutBack(double t) {
-    if (t <= 0) return 0; if (t >= 1) return 1;
-    const c1 = 1.70158; const c3 = c1 + 1;
-    return 1 + c3 * (t - 1) * (t - 1) * (t - 1) + c1 * (t - 1) * (t - 1);
-  }
+  double _easeOutBack(double t) { const c1 = 1.70158; const c3 = c1 + 1; return (t<=0) ? 0 : (t>=1) ? 1 : 1 + c3 * pow(t - 1, 3) + c1 * pow(t - 1, 2); }
 }
 
 class _CountdownDot extends StatelessWidget {
-  final double size;
-  final double fillProgress;
-  final double appearProgress;
+  final double size; final double fillProgress; final double appearProgress;
   const _CountdownDot({required this.size, required this.fillProgress, required this.appearProgress});
-  
   @override
   Widget build(BuildContext context) {
-    final innerSize = (size - 4) * (1 - (1 - fillProgress) * (1 - fillProgress) * (1 - fillProgress) * (1 - fillProgress));
-    final borderOpacity = 0.4 + (0.2 * appearProgress);
-    final glowIntensity = fillProgress > 0.3 ? (fillProgress - 0.3) / 0.7 : 0.0;
-    
     return Container(
-      width: size, height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white.withOpacity(borderOpacity), width: 1.5),
-      ),
-      child: Center(
-        child: Container(
-          width: innerSize, height: innerSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white.withOpacity(0.9),
-            boxShadow: glowIntensity > 0 ? [BoxShadow(color: Colors.white.withOpacity(0.4 * glowIntensity), blurRadius: 8 * glowIntensity)] : null,
-          ),
-        ),
-      ),
+      width: size, height: size, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white.withOpacity(0.4 + 0.2*appearProgress), width: 1.5)),
+      child: Center(child: Container(width: (size-4)*pow(fillProgress, 0.25), height: (size-4)*pow(fillProgress, 0.25), decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.9)))),
     );
   }
 }

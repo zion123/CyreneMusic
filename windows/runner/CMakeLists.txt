@@ -15,6 +15,7 @@ add_executable(${BINARY_NAME} WIN32
   "desktop_lyric_window.cpp"
   "desktop_lyric_plugin.cpp"
   "smtc_plugin.cpp"
+  "rhythm_plugin.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"

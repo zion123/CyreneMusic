@@ -725,6 +725,20 @@ class MusicService extends ChangeNotifier {
       print('   🔗 URL: ${audioUrl.length > 50 ? "${audioUrl.substring(0, 50)}..." : audioUrl}');
       DeveloperModeService().addLog('✅ [MusicService] 获取成功');
 
+      // 🎵 尝试从后端歌词 API 获取歌词
+      String lyric = '';
+      String tlyric = '';
+      try {
+        final lyricData = await _fetchLyricFromBackend(source, songId);
+        if (lyricData != null) {
+          lyric = lyricData['lyric'] ?? '';
+          tlyric = lyricData['tlyric'] ?? '';
+          print('📝 [MusicService] 成功从后端获取歌词: ${lyric.length} 字符');
+        }
+      } catch (e) {
+        print('⚠️ [MusicService] 获取歌词失败（不影响播放）: $e');
+      }
+
       // 洛雪音源只返回 URL，创建一个简化的 SongDetail
       // 注意：歌曲元数据（名称、艺术家、封面等）需要从其他地方获取
       return SongDetail(
@@ -736,8 +750,8 @@ class MusicService extends ChangeNotifier {
         level: lxQuality,
         size: '0',
         url: audioUrl,
-        lyric: '', // 洛雪音源不提供歌词，需要从其他来源获取
-        tlyric: '',
+        lyric: lyric,
+        tlyric: tlyric,
         source: source,
       );
     } catch (e) {
@@ -746,6 +760,68 @@ class MusicService extends ChangeNotifier {
       DeveloperModeService().addLog('❌ [MusicService] 异常: $e');
       return null;
     }
+  }
+
+  /// 从后端歌词 API 获取歌词（供洛雪音源使用）
+  Future<Map<String, String>?> _fetchLyricFromBackend(MusicSource source, dynamic songId) async {
+    // 使用 OmniParse 后端的歌词 API
+    final baseUrl = UrlService().baseUrl;
+    if (baseUrl.isEmpty) {
+      print('⚠️ [MusicService] 后端 URL 未配置，无法获取歌词');
+      return null;
+    }
+
+    String url;
+    switch (source) {
+      case MusicSource.netease:
+        url = '$baseUrl/lyrics/netease?id=$songId';
+        break;
+      case MusicSource.qq:
+        url = '$baseUrl/lyrics/qq?id=$songId';
+        break;
+      case MusicSource.kugou:
+        // 酷狗可能使用 hash 或 emixsongid
+        final idStr = songId.toString();
+        if (idStr.length == 32 && RegExp(r'^[0-9A-Fa-f]+$').hasMatch(idStr)) {
+          url = '$baseUrl/lyrics/kugou?hash=$idStr';
+        } else {
+          url = '$baseUrl/lyrics/kugou?emixsongid=$songId';
+        }
+        break;
+      case MusicSource.kuwo:
+        url = '$baseUrl/lyrics/kuwo?mid=$songId';
+        break;
+      default:
+        print('⚠️ [MusicService] 后端歌词 API 不支持 ${source.name}');
+        return null;
+    }
+
+    print('📝 [MusicService] 获取歌词: GET $url');
+    DeveloperModeService().addLog('📝 [Network] GET $url');
+
+    try {
+      final response = await http.get(Uri.parse(url)).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('歌词请求超时');
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        if (data['status'] == 200 && data['data'] != null) {
+          final lyricData = data['data'] as Map<String, dynamic>;
+          return {
+            'lyric': (lyricData['lyric'] ?? '') as String,
+            'tlyric': (lyricData['tlyric'] ?? '') as String,
+          };
+        }
+      }
+      print('⚠️ [MusicService] 歌词 API 返回异常: ${response.statusCode}');
+    } catch (e) {
+      print('❌ [MusicService] 歌词请求失败: $e');
+    }
+    return null;
   }
 
   /// 从 songId 中提取洛雪音源所需的 ID

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -8,7 +9,7 @@ import '../../services/download_service.dart';
 import '../../services/music_service.dart';
 import '../../models/lyric_line.dart';
 import '../../models/track.dart';
-import '../player_components/player_fluid_cloud_lyrics_panel.dart';
+import 'mobile_player_fluid_cloud_lyric_panel.dart';
 import 'mobile_player_dialogs.dart';
 import 'mobile_player_settings_sheet.dart';
 import 'dart:async';
@@ -225,8 +226,8 @@ class _MobilePlayerFluidCloudLayoutState extends State<MobilePlayerFluidCloudLay
                           ? Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Transform.translate(
-                                  offset: const Offset(0, -24),
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 0), 
                                   child: _buildControlsSection(player),
                                 ),
                                 _buildBottomNavigation(context, track),
@@ -610,27 +611,13 @@ class _MobilePlayerFluidCloudLayoutState extends State<MobilePlayerFluidCloudLay
 
         return SizedBox(
           width: width,
-          height: 20, // 点击热区
-          child: SliderTheme(
-            data: SliderThemeData(
-              trackHeight: 4, 
-              thumbShape: const _VerticalLineThumbShape(
-                width: 4, 
-                height: 20, 
-                color: Colors.white,
-              ),
-              trackShape: const _GapSliderTrackShape(gap: 8.0), // 增加间隙：滑块宽4，半宽2，加6px间距 = 8
-              overlayShape: SliderComponentShape.noOverlay,
-              activeTrackColor: Colors.white.withOpacity(0.9),
-              inactiveTrackColor: Colors.white.withOpacity(0.15),
-            ),
-            child: Slider(
-              value: progress,
-              onChanged: (v) {
-                final pos = Duration(milliseconds: (v * duration).round());
-                player.seek(pos);
-              },
-            ),
+          height: 24, // 增加点击热区
+          child: _AppleMusicSlider(
+            value: progress,
+            onChanged: (v) {
+              final pos = Duration(milliseconds: (v * duration).round());
+              player.seek(pos);
+            },
           ),
         );
       },
@@ -721,7 +708,7 @@ class _MobilePlayerFluidCloudLayoutState extends State<MobilePlayerFluidCloudLay
         ).createShader(bounds);
       },
       blendMode: BlendMode.dstIn,
-      child: PlayerFluidCloudLyricsPanel(
+      child: MobilePlayerFluidCloudLyricsPanel(
         lyrics: widget.lyrics,
         currentLyricIndex: widget.currentLyricIndex,
         showTranslation: widget.showTranslation,
@@ -842,7 +829,7 @@ class _MobilePlayerFluidCloudLayoutState extends State<MobilePlayerFluidCloudLay
         ).createShader(bounds);
       },
       blendMode: BlendMode.dstIn,
-      child: PlayerFluidCloudLyricsPanel(
+      child: MobilePlayerFluidCloudLyricsPanel(
         lyrics: widget.lyrics,
         currentLyricIndex: widget.currentLyricIndex,
         showTranslation: widget.showTranslation,
@@ -869,31 +856,16 @@ class _MobilePlayerFluidCloudLayoutState extends State<MobilePlayerFluidCloudLay
 
               return Column(
                 children: [
-                  // 进度条 - MD3 风格 (竖线滑块 + 分离式轨道)
+                  // 进度条 - Apple Music 风格
                   SizedBox(
-                     height: 20, // 增加点击热区
-                     child: SliderTheme(
-                      data: SliderThemeData(
-                        trackHeight: 4,
-                        thumbShape: const _VerticalLineThumbShape(
-                          width: 4,
-                          height: 20,
-                          color: Colors.white,
-                        ),
-                        // 增加间隙
-                        trackShape: const _GapSliderTrackShape(gap: 8.0), 
-                        overlayShape: SliderComponentShape.noOverlay,
-                        activeTrackColor: Colors.white.withOpacity(0.9),
-                        inactiveTrackColor: Colors.white.withOpacity(0.2),
-                      ),
-                      child: Slider(
+                     height: 24, // 增加点击热区
+                     child: _AppleMusicSlider(
                         value: value,
                         onChanged: (v) {
                           final pos = Duration(milliseconds: (v * duration).round());
                           player.seek(pos);
                         },
                       ),
-                    ),
                   ),
                   
                   const SizedBox(height: 8),
@@ -1408,23 +1380,130 @@ class _DownloadButtonState extends State<_DownloadButton> {
   }
 }
 
-/// 自定义竖线滑块形状 (Material Design 3 风格)
-class _VerticalLineThumbShape extends SliderComponentShape {
-  final double width;
-  final double height;
-  final Color color;
-  final double radius;
+/// Apple Music 风格的 Slider 组件
+/// 1. 默认显示微弱滑块
+/// 2. 交互时激活轨道变亮
+/// 3. 使用圆形滑块，触摸拖动时放大
+class _AppleMusicSlider extends StatefulWidget {
+  final double value;
+  final ValueChanged<double>? onChanged;
+  final double min;
+  final double max;
+  final Color activeColor;
+  final Color inactiveColor;
 
-  const _VerticalLineThumbShape({
-    this.width = 4.0, // MD3 Spec: 4dp
-    this.height = 44.0, // MD3 Spec: 44dp (Active handle height)
-    this.color = Colors.white,
-    this.radius = 2.0, // MD3 Spec: 2dp
+  const _AppleMusicSlider({
+    required this.value,
+    required this.onChanged,
+    this.min = 0.0,
+    this.max = 1.0,
+    this.activeColor = Colors.white,
+    this.inactiveColor = const Color(0x1FFFFFFF), // 约 12% 不透明度
+  });
+
+  @override
+  State<_AppleMusicSlider> createState() => _AppleMusicSliderState();
+}
+
+class _AppleMusicSliderState extends State<_AppleMusicSlider> with SingleTickerProviderStateMixin {
+  bool _isInteracting = false;
+  double? _dragValue; // 用于处理移动端拖动时的平滑感
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    );
+  }
+  
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        // 交互时 active track 变亮
+        final currentActiveColor = widget.activeColor.withOpacity(
+          lerpDouble(0.45, 0.8, _animation.value) ?? 0.45
+        );
+            
+        final currentInactiveColor = Color.lerp(
+          widget.inactiveColor,
+          Colors.white.withOpacity(0.3),
+          _animation.value
+        ) ?? widget.inactiveColor;
+
+        return SliderTheme(
+          data: SliderThemeData(
+            trackHeight: 6, 
+            trackShape: const RoundedRectSliderTrackShape(),
+            thumbShape: _AppleMusicThumbShape(
+              scale: _animation.value, // 完全跟随动画，未交互时为 0 (隐藏)
+              opacity: _animation.value,
+            ),
+            overlayShape: SliderComponentShape.noOverlay,
+            activeTrackColor: currentActiveColor,
+            inactiveTrackColor: currentInactiveColor,
+          ),
+          child: Slider(
+            value: _dragValue ?? widget.value,
+            onChanged: (v) {
+              setState(() {
+                _dragValue = v; // 立即更新本地值以确保拖动流畅
+              });
+              if (widget.onChanged != null) widget.onChanged!(v);
+            },
+            onChangeStart: (_) {
+              setState(() {
+                _isInteracting = true;
+                _dragValue = widget.value;
+              });
+              _controller.forward();
+            },
+            onChangeEnd: (_) {
+              setState(() {
+                _isInteracting = false;
+                _dragValue = null; // 释放拖动，恢复跟随外部进度
+              });
+              _controller.reverse();
+            },
+            min: widget.min,
+            max: widget.max,
+          ),
+        );
+      }
+    );
+  }
+}
+
+/// 自定义圆形滑块，支持缩放和透明度动画
+class _AppleMusicThumbShape extends SliderComponentShape {
+  final double scale;
+  final double opacity;
+  final double maxRadius;
+
+  const _AppleMusicThumbShape({
+    required this.scale,
+    this.opacity = 1.0,
+    this.maxRadius = 6.0,
   });
 
   @override
   Size getPreferredSize(bool isEnabled, bool isDiscrete) {
-    return Size(width, height);
+    return Size.fromRadius(maxRadius);
   }
 
   @override
@@ -1442,109 +1521,21 @@ class _VerticalLineThumbShape extends SliderComponentShape {
     required double textScaleFactor,
     required Size sizeWithOverflow,
   }) {
-    final Canvas canvas = context.canvas;
+    if (scale <= 0.01) return; // 隐藏不绘制
 
+    final Canvas canvas = context.canvas;
+    
+    // 绘制阴影
+    final path = Path()
+      ..addOval(Rect.fromCircle(center: center, radius: maxRadius * scale));
+    
+    canvas.drawShadow(path, Colors.black.withOpacity(0.3 * opacity), 3.0, true);
+
+    // 绘制白色圆点
     final Paint paint = Paint()
-      ..color = color
+      ..color = Colors.white.withOpacity(opacity)
       ..style = PaintingStyle.fill;
     
-    // 绘制圆角矩形竖线
-    final RRect rRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(
-        center: center,
-        width: width,
-        height: height * activationAnimation.value.clamp(0.5, 1.0), // 动画效果
-      ),
-      Radius.circular(radius),
-    );
-
-    canvas.drawRRect(rRect, paint);
-  }
-}
-
-/// 自定义带有间隙的轨道形状，确保滑块左右两侧不与轨道相连
-class _GapSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
-  final double gap; // 滑块中心到轨道的间隔
-
-  const _GapSliderTrackShape({this.gap = 6.0});
-
-  @override
-  void paint(
-    PaintingContext context,
-    Offset offset, {
-    required RenderBox parentBox,
-    required SliderThemeData sliderTheme,
-    required Animation<double> enableAnimation,
-    required TextDirection textDirection,
-    required Offset thumbCenter,
-    Offset? secondaryOffset,
-    bool isDiscrete = false,
-    bool isEnabled = false,
-    double additionalActiveTrackHeight = 0,
-  }) {
-    if (sliderTheme.trackHeight == null || sliderTheme.trackHeight! <= 0) {
-      return;
-    }
-
-    // 获取颜色
-    final ColorTween activeTrackColorTween = ColorTween(
-        begin: sliderTheme.disabledActiveTrackColor,
-        end: sliderTheme.activeTrackColor);
-    final ColorTween inactiveTrackColorTween = ColorTween(
-        begin: sliderTheme.disabledInactiveTrackColor,
-        end: sliderTheme.inactiveTrackColor);
-    final Paint activePaint = Paint()
-      ..color = activeTrackColorTween.evaluate(enableAnimation)!;
-    final Paint inactivePaint = Paint()
-      ..color = inactiveTrackColorTween.evaluate(enableAnimation)!;
-
-    // 获取轨道矩形
-    final Rect trackRect = getPreferredRect(
-      parentBox: parentBox,
-      offset: offset,
-      sliderTheme: sliderTheme,
-      isEnabled: isEnabled,
-      isDiscrete: isDiscrete,
-    );
-
-    final double trackHeight = sliderTheme.trackHeight!;
-    final double trackCenterY = offset.dy + (parentBox.size.height) / 2;
-    final Radius trackRadius = Radius.circular(trackHeight / 2);
-
-    // 计算 Active Track (左侧)
-    // 从轨道左端到滑块中心减去间隙
-    final double activeRight = thumbCenter.dx - gap;
-    final double activeLeft = trackRect.left;
-
-    if (activeRight > activeLeft) {
-      final Rect activeRect = Rect.fromLTRB(
-        activeLeft,
-        trackCenterY - trackHeight / 2,
-        activeRight,
-        trackCenterY + trackHeight / 2,
-      );
-      context.canvas.drawRRect(
-        RRect.fromRectAndRadius(activeRect, trackRadius),
-        activePaint,
-      );
-    }
-
-    // 计算 Inactive Track (右侧)
-    // 从滑块中心加上间隙到轨道右端
-    final double inactiveLeft = thumbCenter.dx + gap;
-    final double inactiveRight = trackRect.right;
-
-    if (inactiveRight > inactiveLeft) {
-      final Rect inactiveRect = Rect.fromLTRB(
-        inactiveLeft,
-        trackCenterY - trackHeight / 2,
-        inactiveRight,
-        trackCenterY + trackHeight / 2,
-      );
-      context.canvas.drawRRect(
-        RRect.fromRectAndRadius(inactiveRect, trackRadius),
-        inactivePaint,
-      );
-    }
+    canvas.drawCircle(center, maxRadius * scale, paint);
   }
 }

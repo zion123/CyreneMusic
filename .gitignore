@@ -52,6 +52,6 @@ app.*.map.json
 /website/
 /gamdl/
 /AppleMusicDecrypt/
-/backend/
-/demo/
 test.html
+/demo/
+/backend/
