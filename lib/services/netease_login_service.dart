@@ -73,11 +73,18 @@ class NeteaseLoginService extends ChangeNotifier {
       throw Exception('无效响应');
     }
 
-    return NeteaseQrCheckResult(
+    final result = NeteaseQrCheckResult(
       code: statusCode,
       message: (data['message'] ?? data['msg']) as String?,
       profile: data['profile'] as Map<String, dynamic>?,
     );
+    
+    // 如果绑定成功（803），通知监听者刷新 UI
+    if (statusCode == 803) {
+      notifyListeners();
+    }
+    
+    return result;
   }
 
   // ===== Third-party accounts =====
@@ -102,7 +109,11 @@ class NeteaseLoginService extends ChangeNotifier {
       },
       body: json.encode({'timestamp': timestamp}),
     ).timeout(const Duration(seconds: 10));
-    return r.statusCode == 200;
+    final success = r.statusCode == 200;
+    if (success) {
+      notifyListeners();
+    }
+    return success;
   }
 
   /// 检查是否已绑定网易云账号

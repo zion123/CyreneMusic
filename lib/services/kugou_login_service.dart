@@ -194,7 +194,7 @@ class KugouLoginService extends ChangeNotifier {
       print('[KugouLoginService] checkQrStatus 解析结果: status=$statusVal');
     }
 
-    return KugouQrCheckResult(
+    final result = KugouQrCheckResult(
       status: statusVal,
       message: data['message'] as String?,
       token: data['token'] as String?,
@@ -204,6 +204,13 @@ class KugouLoginService extends ChangeNotifier {
       vip_type: data['vip_type'] as int?,
       vip_token: data['vip_token'] as String?,
     );
+    
+    // 如果绑定成功（status 4），通知监听者刷新 UI
+    if (statusVal == 4) {
+      notifyListeners();
+    }
+    
+    return result;
   }
 
   // ===== Third-party accounts =====
@@ -228,7 +235,11 @@ class KugouLoginService extends ChangeNotifier {
       },
       body: json.encode({'timestamp': timestamp}),
     ).timeout(const Duration(seconds: 10));
-    return r.statusCode == 200;
+    final success = r.statusCode == 200;
+    if (success) {
+      notifyListeners();
+    }
+    return success;
   }
 
   /// 获取用户酷狗歌单列表

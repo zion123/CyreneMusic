@@ -29,16 +29,27 @@ class _ThirdPartyAccountsState extends State<ThirdPartyAccounts> {
   void initState() {
     super.initState();
     AuthService().addListener(_onAuthChanged);
+    // 监听第三方登录服务的状态变化
+    NeteaseLoginService().addListener(_onBindingChanged);
+    KugouLoginService().addListener(_onBindingChanged);
     _loadBindingStatus();
   }
 
   @override
   void dispose() {
     AuthService().removeListener(_onAuthChanged);
+    NeteaseLoginService().removeListener(_onBindingChanged);
+    KugouLoginService().removeListener(_onBindingChanged);
     super.dispose();
   }
 
   void _onAuthChanged() {
+    if (!mounted) return;
+    _loadBindingStatus();
+  }
+
+  /// 当第三方账号绑定状态变化时刷新绑定数量
+  void _onBindingChanged() {
     if (!mounted) return;
     _loadBindingStatus();
   }

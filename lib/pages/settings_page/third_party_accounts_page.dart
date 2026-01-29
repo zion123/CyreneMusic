@@ -85,15 +85,29 @@ class _ThirdPartyAccountsContentState extends State<ThirdPartyAccountsContent> {
   void initState() {
     super.initState();
     AuthService().addListener(_onAuthChanged);
+    // 监听第三方登录服务的状态变化
+    NeteaseLoginService().addListener(_onBindingChanged);
+    KugouLoginService().addListener(_onBindingChanged);
   }
 
   @override
   void dispose() {
     AuthService().removeListener(_onAuthChanged);
+    NeteaseLoginService().removeListener(_onBindingChanged);
+    KugouLoginService().removeListener(_onBindingChanged);
     super.dispose();
   }
 
   void _onAuthChanged() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _refresh();
+    });
+  }
+
+  /// 当第三方账号绑定状态变化时刷新 UI
+  void _onBindingChanged() {
     if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
