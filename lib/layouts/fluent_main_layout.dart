@@ -30,6 +30,7 @@ import '../widgets/mini_player.dart';
 import '../widgets/search_widget.dart';
 import '../widgets/video_background_player.dart';
 import '../pages/home_page/home_overlay_controller.dart';
+import '../widgets/global_watermark.dart';
 
 /// Fluent UI 版本的主布局，使用 NavigationView
 /// 按照 Windows 设计规范实现左侧导航栏

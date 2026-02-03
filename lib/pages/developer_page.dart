@@ -1372,6 +1372,22 @@ class _DeveloperPageState extends State<DeveloperPage> with SingleTickerProvider
           ),
         ),
         const SizedBox(height: 8),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.show_chart),
+            title: const Text('性能叠加层'),
+            subtitle: const Text('开启后在界面顶部显示帧率和渲染监控曲线'),
+            trailing: Switch.adaptive(
+              value: DeveloperModeService().showPerformanceOverlay,
+              onChanged: (value) {
+                setState(() {
+                  DeveloperModeService().togglePerformanceOverlay(value);
+                });
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
         FilledButton.icon(
           onPressed: () async {
             await NotificationService().showNotification(
@@ -2818,6 +2834,22 @@ class _DeveloperPageState extends State<DeveloperPage> with SingleTickerProvider
             ),
           ),
         ),
+        const SizedBox(height: 8),
+        fluent.Card(
+          child: fluent.ListTile(
+            leading: const Icon(fluent.FluentIcons.line_chart),
+            title: const Text('性能叠加层'),
+            subtitle: const Text('开启后在界面顶部显示帧率和渲染监控曲线'),
+            trailing: fluent.ToggleSwitch(
+              checked: DeveloperModeService().showPerformanceOverlay,
+              onChanged: (value) {
+                setState(() {
+                  DeveloperModeService().togglePerformanceOverlay(value);
+                });
+              },
+            ),
+          ),
+        ),
         const SizedBox(height: 24),
         fluent.FilledButton(
           onPressed: () {
@@ -3452,6 +3484,27 @@ class _DeveloperPageState extends State<DeveloperPage> with SingleTickerProvider
               onChanged: (value) {
                 setState(() {
                   DeveloperModeService().toggleSearchResultMerge(value);
+                });
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        // 性能叠加层开关
+        Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1C1C1E) : CupertinoColors.white,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: CupertinoListTile(
+            leading: const Icon(CupertinoIcons.graph_square, color: CupertinoColors.activeBlue),
+            title: const Text('性能叠加层'),
+            subtitle: const Text('显示帧率和渲染监控曲线'),
+            trailing: CupertinoSwitch(
+              value: DeveloperModeService().showPerformanceOverlay,
+              onChanged: (value) {
+                setState(() {
+                  DeveloperModeService().togglePerformanceOverlay(value);
                 });
               },
             ),

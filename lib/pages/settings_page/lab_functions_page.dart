@@ -238,6 +238,93 @@ class _LabFunctionsContentState extends State<LabFunctionsContent> {
     final theme = fluent_ui.FluentTheme.of(context);
     final isSponsor = AuthService().currentUser?.isSponsor ?? false;
 
+    // 构建核心列表内容
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const fluent_ui.InfoBar(
+          title: Text('欢迎来到实验室'),
+          content: Text('在这里可以抢先体验还没有正式上线的功能，仅赞助用户可用。'),
+          severity: fluent_ui.InfoBarSeverity.info,
+          isIconVisible: true,
+        ),
+        const SizedBox(height: 24),
+        if (!isSponsor) ...[
+          const fluent_ui.InfoBar(
+            title: Text('权限受限'),
+            content: Text('实验室功能仅对赞助用户开放。'),
+            severity: fluent_ui.InfoBarSeverity.warning,
+          ),
+          const SizedBox(height: 24),
+        ],
+        Text('实验性功能', style: theme.typography.subtitle),
+        const SizedBox(height: 12),
+        fluent_ui.Card(
+          child: fluent_ui.ListTile(
+            leading: const Icon(fluent_ui.FluentIcons.equalizer),
+            title: const Text('均衡器'),
+            subtitle: const Text('自定义音频频率响应'),
+            trailing: const Icon(fluent_ui.FluentIcons.chevron_right, size: 12),
+            onPressed: isSponsor
+                ? () => Navigator.push(
+                      context,
+                      fluent_ui.FluentPageRoute(builder: (_) => const EqualizerPage()),
+                    )
+                : null,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (Platform.isAndroid)
+          fluent_ui.Card(
+            child: Row(
+              children: [
+                const Icon(fluent_ui.FluentIcons.all_apps),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('安卓桌面小部件', style: theme.typography.bodyLarge),
+                      Text('开启安卓主屏幕音乐控制小部件', style: theme.typography.body),
+                    ],
+                  ),
+                ),
+                fluent_ui.ToggleSwitch(
+                  checked: _labService.enableAndroidWidget,
+                  onChanged: isSponsor ? (value) => _labService.setEnableAndroidWidget(value) : null,
+                ),
+              ],
+            ),
+          )
+        else
+          fluent_ui.Card(
+            child: Row(
+              children: [
+                const Icon(fluent_ui.FluentIcons.test_beaker),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('暂无实验性功能', style: theme.typography.bodyLarge),
+                      Text('敬请期待更多功能的加入', style: theme.typography.body),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+
+    // 如果是嵌入模式，则不需要自己的 ScaffoldPage 和 PageHeader
+    if (widget.embed) {
+      return fluent_ui.ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 0),
+        children: [content],
+      );
+    }
+
     return fluent_ui.ScaffoldPage.scrollable(
       header: fluent_ui.PageHeader(
         title: Row(
@@ -281,83 +368,7 @@ class _LabFunctionsContentState extends State<LabFunctionsContent> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const fluent_ui.InfoBar(
-                title: Text('欢迎来到实验室'),
-                content: Text('在这里可以抢先体验还没有正式上线的功能，仅赞助用户可用。'),
-                severity: fluent_ui.InfoBarSeverity.info,
-                isIconVisible: true,
-              ),
-              const SizedBox(height: 24),
-              if (!isSponsor) ...[
-                const fluent_ui.InfoBar(
-                  title: Text('权限受限'),
-                  content: Text('实验室功能仅对赞助用户开放。'),
-                  severity: fluent_ui.InfoBarSeverity.warning,
-                ),
-                const SizedBox(height: 24),
-              ],
-              Text('实验性功能', style: theme.typography.subtitle),
-              const SizedBox(height: 12),
-              fluent_ui.Card(
-                child: fluent_ui.ListTile(
-                  leading: const Icon(fluent_ui.FluentIcons.equalizer),
-                  title: const Text('均衡器'),
-                  subtitle: const Text('自定义音频频率响应'),
-                  trailing: const Icon(fluent_ui.FluentIcons.chevron_right, size: 12),
-                  onPressed: isSponsor
-                      ? () => Navigator.push(
-                            context,
-                            fluent_ui.FluentPageRoute(builder: (_) => const EqualizerPage()),
-                          )
-                      : null,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (Platform.isAndroid)
-                fluent_ui.Card(
-                  child: Row(
-                    children: [
-                      const Icon(fluent_ui.FluentIcons.all_apps),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('安卓桌面小部件', style: theme.typography.bodyLarge),
-                            Text('开启安卓主屏幕音乐控制小部件', style: theme.typography.body),
-                          ],
-                        ),
-                      ),
-                      fluent_ui.ToggleSwitch(
-                        checked: _labService.enableAndroidWidget,
-                        onChanged: isSponsor ? (value) => _labService.setEnableAndroidWidget(value) : null,
-                      ),
-                    ],
-                  ),
-                )
-              else
-                fluent_ui.Card(
-                  child: Row(
-                    children: [
-                      const Icon(fluent_ui.FluentIcons.test_beaker),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('暂无实验性功能', style: theme.typography.bodyLarge),
-                            Text('敬请期待更多功能的加入', style: theme.typography.body),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
+          child: content,
         ),
       ],
     );

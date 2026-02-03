@@ -421,7 +421,7 @@ class _MyAppState extends State<MyApp> {
     final themeManager = ThemeManager();
 
     return AnimatedBuilder(
-      animation: themeManager,
+      animation: Listenable.merge([themeManager, DeveloperModeService()]),
       builder: (context, _) {
         final lightTheme = themeManager.buildThemeData(Brightness.light);
         final darkTheme = themeManager.buildThemeData(Brightness.dark);
@@ -437,6 +437,7 @@ class _MyAppState extends State<MyApp> {
               return fluent.FluentApp(
                 title: 'Cyrene Music',
                 debugShowCheckedModeBanner: false,
+                showPerformanceOverlay: DeveloperModeService().showPerformanceOverlay,
                 theme: themeManager.buildFluentThemeData(Brightness.light),
                 darkTheme: themeManager.buildFluentThemeData(Brightness.dark),
                 themeMode: _mapMaterialThemeMode(themeManager.themeMode),
@@ -478,6 +479,7 @@ class _MyAppState extends State<MyApp> {
           return MaterialApp(
             title: 'Cyrene Music',
             debugShowCheckedModeBanner: false,
+            showPerformanceOverlay: DeveloperModeService().showPerformanceOverlay,
             navigatorKey: MyApp.navigatorKey,
             theme: lightTheme.copyWith(
               cupertinoOverrideTheme: themeManager.buildCupertinoThemeData(Brightness.light),
@@ -533,6 +535,7 @@ class _MyAppState extends State<MyApp> {
         return MaterialApp(
           title: 'Cyrene Music',
           debugShowCheckedModeBanner: false,
+          showPerformanceOverlay: DeveloperModeService().showPerformanceOverlay,
           navigatorKey: MyApp.navigatorKey,
           theme: lightTheme,
           darkTheme: darkTheme,

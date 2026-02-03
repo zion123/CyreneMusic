@@ -1277,10 +1277,7 @@ class _WordFillWidgetState extends State<_WordFillWidget> with TickerProviderSta
     return ShaderMask(
       shaderCallback: _createGradientShader(),
       blendMode: BlendMode.srcIn,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 2.0, bottom: 10.0),
-        child: Text(widget.text, style: widget.style.copyWith(color: Colors.white)),
-      ),
+      child: Text(widget.text, style: widget.style.copyWith(color: Colors.white)),
     );
   }
 
@@ -1297,10 +1294,7 @@ class _WordFillWidgetState extends State<_WordFillWidget> with TickerProviderSta
         textBaseline: TextBaseline.alphabetic,
         children: List.generate(letterCount, (index) {
           final letter = letters[index];
-          return Padding(
-            padding: const EdgeInsets.only(top: 2.0, bottom: 10.0),
-            child: Text(letter, style: widget.style.copyWith(color: Colors.white)),
-          );
+          return Text(letter, style: widget.style.copyWith(color: Colors.white));
         }),
       ),
     );

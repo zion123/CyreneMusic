@@ -24,6 +24,7 @@ import '../utils/theme_manager.dart';
 import '../pages/auth/auth_page.dart';
 import '../services/auth_overlay_service.dart';
 import '../services/player_service.dart';
+import '../widgets/global_watermark.dart';
 
 /// 主布局 - 包含侧边导航栏和内容区域
 class MainLayout extends StatefulWidget {
@@ -356,7 +357,7 @@ class _MainLayoutState extends State<MainLayout>
     // 根据平台选择不同的布局
     if (Platform.isAndroid || Platform.isIOS) {
       // Android/iOS 始终使用移动布局
-      return _buildMobileLayout(context);
+      return GlobalWatermark(child: _buildMobileLayout(context));
     } else if (Platform.isWindows) {
       // Windows 根据用户偏好选择布局，使用 AnimatedBuilder 确保更新
       return AnimatedBuilder(
@@ -365,9 +366,11 @@ class _MainLayoutState extends State<MainLayout>
           final isDesktop = LayoutPreferenceService().isDesktopLayout;
           print('🖥️ [MainLayout] 当前布局模式: ${isDesktop ? "桌面模式" : "移动模式"}');
 
-          return isDesktop
-              ? _buildDesktopLayout(context)
-              : _buildMobileLayout(context);
+      return GlobalWatermark(
+        child: isDesktop
+            ? _buildDesktopLayout(context)
+            : _buildMobileLayout(context),
+      );
         },
       );
     } else {

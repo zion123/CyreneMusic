@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/track.dart';
+import '../../services/auth_service.dart';
 import 'settings_sections/settings_sections.dart';
 
 /// 移动端播放器设置底部弹出板 - Material Design Expressive 风格
@@ -144,9 +145,10 @@ class _MobilePlayerSettingsSheetState extends State<MobilePlayerSettingsSheet>
                       SizedBox(height: 24),
 
                       // 均衡器
-                      RepaintBoundary(child: EqualizerSection()),
-                      
-                      SizedBox(height: 24),
+                      if (AuthService().currentUser?.isSponsor ?? false) ...[
+                        RepaintBoundary(child: EqualizerSection()),
+                        SizedBox(height: 24),
+                      ],
 
                       // 歌词细节设置
                       RepaintBoundary(child: LyricDetailSection()),
